@@ -1387,7 +1387,13 @@ function statTiles(t, nBots) {
     tile('에셋', t.assets, `지금 버전 · 봇 ${t.asset_bots}개`, `${t.assets.toLocaleString('ko-KR')}개 (카드·모듈 속 그림 등)`)].join('');
 }
 
-// ---- 홈 인사말: 계절 × 시간대 (같은 날 같은 시간대엔 같은 말), 특별한 날은 따로 ----
+// ---- 홈 인사말: 기본 · 시간대 · 계절 × 시간대 중 하나 (같은 날 같은 시간대엔 같은 말), 특별한 날은 따로 ----
+const GREET_BASIC = ['오늘은 누구를 꺼낼까요', '서재에 들렀네요. 누구를 볼까요', '어떤 이야기를 이어 갈까요', '한 권 꺼내 볼까요', '오늘의 한 권은 누구일까요'];
+const GREET_TIME = {dawn: ['이 시간까지 깨어 있네요', '새벽엔 조용한 이야기가 좋아요', '한 장만 더 읽고 잘까요'],
+  morning: ['좋은 아침이에요. 누구부터 볼까요', '아침엔 가벼운 이야기 어때요', '오늘 첫 이야기를 골라 볼까요'],
+  day: ['점심은 먹었어요? 잠깐 쉬어 가요', '오후의 한 권, 누구로 할까요', '잠깐 쉬는 시간이에요'],
+  evening: ['오늘도 수고했어요. 누구를 만날까요', '저녁엔 느긋하게 골라요', '하루 끝, 이야기 하나 어때요'],
+  night: ['밤이 깊었어요. 누구를 꺼낼까요', '자기 전에 한 장만', '밤엔 긴 이야기가 좋아요']};
 const GREET = {
   spring: {dawn: ['새벽 벚꽃 사이로, 누구를 꺼낼까요', '잠 못 드는 봄 새벽이에요'], morning: ['봄 아침, 첫 장을 넘겨 볼까요', '꽃 피는 아침이에요. 누구부터 볼까요'],
     day: ['나른한 봄 오후, 누구를 꺼낼까요', '햇살 좋은 봄날, 한 권 꺼내 볼까요'], evening: ['봄 저녁 바람이 좋아요. 누구를 만날까요', '노을 지는 봄 저녁이에요'],
@@ -1411,8 +1417,9 @@ function greeting(d = new Date()) {
   const part = hr < 5 ? 'dawn' : hr < 11 ? 'morning' : hr < 17 ? 'day' : hr < 21 ? 'evening' : 'night';
   const k = `${SEASON[season]} ${DAYPART[part]}`, special = GREET_DAY[`${mo}-${d.getDate()}`];
   if (special) return {k, title: special};
-  const l = GREET[season][part], seed = [...`${d.getFullYear()}-${mo}-${d.getDate()}-${part}`].reduce((a, c) => a * 31 + c.charCodeAt(0) >>> 0, 7);
-  return {k, title: l[seed % l.length]};
+  const seed = [...`${d.getFullYear()}-${mo}-${d.getDate()}-${part}`].reduce((a, c) => a * 31 + c.charCodeAt(0) >>> 0, 7);
+  const l = [GREET_BASIC, GREET_TIME[part], GREET[season][part]][seed % 3];  // 세 갈래가 고르게
+  return {k, title: l[(seed >>> 2) % l.length]};
 }
 
 // ---- 홈: 폴더 입구 ----
