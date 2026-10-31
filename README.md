@@ -111,6 +111,6 @@ docker compose restart      # 파이썬으로 띄웠다면 껐다가 다시 켜�
 
 ## 라이선스
 
-[AGPL-3.0](LICENSE). 리스 모듈을 읽는 데 쓰는 RisuAI의 rpack 표 때문이에요. 자세한 건 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)를 보세요.
+[AGPL-3.0](LICENSE). 자세한 건 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)를 보세요.
 
 봇카이브는 RisuAI와 상관없는 개인 프로젝트예요.
