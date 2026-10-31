@@ -1,0 +1,10 @@
+# 내 자료 (봇·채팅 로그·그림·백업) — 절대 올리지 않기
+data/
+*.db
+*.db-*
+.env
+
+__pycache__/
+*.pyc
+.DS_Store
+Thumbs.db

@@ -1,0 +1,26 @@
+# 봇카이브 — docker compose up -d 로 켜고, 브라우저에서 http://127.0.0.1:8391 (포트는 .env의 BOTSHELF_PORT)
+# 처음 켜기 전에 mkdir data (도커가 대신 만들면 관리자 소유가 돼서 앱이 못 씀)
+# 로그인이 없는 앱이라 이 컴퓨터(127.0.0.1)에만 열어 둠. 휴대폰 등에서 쓰려면 README의 'Tailscale로 내 기기에서만 열기'
+services:
+  botshelf:
+    image: python:3.12-slim
+    container_name: botshelf
+    user: "${BOTSHELF_UID:-1000}:${BOTSHELF_GID:-1000}"
+    working_dir: /app
+    command: ["python", "-u", "server.py"]
+    environment:
+      - DATA_DIR=/data
+      - PORT=8391
+      - HOST=0.0.0.0
+      - TZ=${TZ:-Asia/Seoul}
+    volumes:
+      - ./app:/app:ro
+      - ./data:/data
+    ports:
+      - "127.0.0.1:${BOTSHELF_PORT:-8391}:8391"
+    restart: unless-stopped
+    stop_grace_period: 10s
+    deploy:
+      resources:
+        limits:
+          memory: 256M
