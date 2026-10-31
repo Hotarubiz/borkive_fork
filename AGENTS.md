@@ -88,8 +88,10 @@ cd app; $env:DATA_DIR = "..\data"; python server.py   # 윈도우 PowerShell
   - `bots`: 봇과 자료함 자료를 같이 담아요. `itype`이 `''`이면 봇, 값이 있으면 자료 종류 키예요.
   - `versions`, `files`, `intros`, `links`
   - `chats`, `messages`, `marks`
-  - `folders`: `scope`가 `bot`이면 서재 폴더, `item`이면 자료함 폴더예요. `bot_folders`로 봇과 이어져요.
-  - `statuses`, `itypes`: 이름표 표 (기본 몇 개 + 사용자가 더한 것)
+  - `folders`: `scope`가 `bot`이면 서재 폴더, `item`이면 자료함 폴더, `style`이면 그림체 폴더예요. 봇·자료는 `bot_folders`, 그림체는 `style_folders`로 이어져요.
+  - `statuses`, `itypes`, `stypes`: 이름표 표 (기본 몇 개 + 사용자가 더한 것). `stypes`는 그림체 분류
+  - `styles`, `style_images`, `style_folders`, `bot_styles`: 그림체(프롬프트·설정 + 견본 그림), 그림체 폴더, 봇 ↔ 그림체(`role` official|mine)
+  - `settings`, `sessions`: 잠금 설정과 로그인
   - `shelves`: 예전 자료함 칸
 - 그림은 `data/media/`, 원본 파일은 `data/files/`(무작위 이름), 백업은 `data/backups/`.
 
@@ -101,7 +103,8 @@ cd app; $env:DATA_DIR = "..\data"; python server.py   # 윈도우 PowerShell
 - **CSS 클래스 이름이 겹치지 않게** 새 이름은 먼저 검색하세요. 예: `.dim`은 창 뒤 어두운 배경(화면 전체 고정)이라 다른 데 쓰면 화면이 깨져요.
 - **주소 바꾸기:** 방문 기록을 안 남기는 이동은 `location.replace` 대신 `replaceHash()`를 쓰세요. 뒤로 버튼(`navStack`)이 어긋나지 않게요.
 - **봇과 자료:** `/api/bots`는 봇만, `/api/bots?items=1`은 자료만 돌려줘요. 봇 페이지(`drawBot`)가 둘을 같이 그리고, `B.itype`으로 나눠요.
-- **이름표:** 상태와 자료 종류는 서버 `LABELS`, 화면 `labelDialog(t)`·`syncStatus()`를 같이 써요.
+- **이름표:** 상태·자료 종류·그림체 분류는 서버 `LABELS`(지울 때 옮길 곳은 `LABEL_MOVE`), 화면 `labelDialog(t)`·`syncStatus()`를 같이 써요.
+- **그림체 파일:** `{"format": "botkive-style", "version": 1, "styles": [...]}`. 그림은 data URL로 들어 있어요. 형식을 바꾸면 `version`을 올리고, 예전 파일도 읽히게 하세요.
 - **잠금:** 새 API나 파일 주소를 만들 때 `do_*`의 `self.gate()` 검사 뒤에 두세요. 로그인 없이 열리는 건 화면(`/`), `/api/auth`, `/api/auth/login|logout`, `/api/health`(잠겨 있으면 개수 없이)뿐이에요.
   - 비밀번호는 `settings.auth_hash`(scrypt)에, 로그인은 `sessions`(쿠키 토큰의 sha256)에 저장해요. 비밀번호 원문이나 토큰 원문은 저장하지도, 기록하지도 마세요.
   - '밖에서만' 판단(`is_local`): 프록시 표시(`X-Forwarded-For`, `Tailscale-User-Login` 등)가 없고 루프백·도커 게이트웨이(`TRUST_GATEWAY=1`)에서 온 요청만 '이 컴퓨터'로 봐요.

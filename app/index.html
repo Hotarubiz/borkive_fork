@@ -488,6 +488,32 @@ img.emo{display:block;max-width:min(300px,100%);max-height:380px;width:auto;marg
 .addtop .cv{width:150px;flex:none}
 .colors{display:flex;gap:8px;flex-wrap:wrap}
 .srows{display:flex;flex-direction:column;gap:8px}
+.sprm{margin:0;padding:12px 14px;border-radius:12px;background:var(--sunk2);border:1px solid var(--line);font:13px/1.6 Consolas,'D2Coding',monospace;color:var(--ink2);white-space:pre-wrap;overflow-wrap:anywhere;max-height:260px;overflow:auto}
+.sset{margin-top:16px;grid-template-columns:repeat(auto-fill,minmax(130px,1fr))}
+.kv.sset b{font-family:inherit;font-size:14px;font-weight:600;line-height:1.4;overflow-wrap:anywhere}
+.simgs{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px}
+.simgs.sm{grid-template-columns:repeat(auto-fill,minmax(90px,1fr))}
+.simgs.sm:empty{display:none}
+.sim{position:relative;border-radius:12px;overflow:hidden;background:var(--sunk2);aspect-ratio:3/4}
+.sim img{width:100%;height:100%;object-fit:cover;display:block;cursor:zoom-in}
+.sim .sgen{position:absolute;left:6px;top:6px;padding:1px 7px;border-radius:999px;font-size:11px;font-weight:700;background:rgba(10,10,12,.72);color:#e8e8ee}
+.sim>.ib,.simb{position:absolute;right:4px;top:4px}
+.sim>.ib,.simb .ib{width:28px;height:28px;background:rgba(10,10,12,.72);color:#e8e8ee}
+.simb{display:flex;gap:4px;opacity:0;transition:opacity .15s}
+.sim:hover .simb,.sim:focus-within .simb{opacity:1}
+@media (hover:none){.simb{opacity:1}}
+.sfta{min-height:96px;font:13px/1.6 Consolas,'D2Coding',monospace}
+.sfset{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:10px}
+.sbl{display:flex;flex-direction:column;gap:6px}
+.sbr{display:flex;align-items:center;gap:10px;min-width:0;flex:1;color:var(--ink);text-decoration:none}
+.sbr img,.sbr .sph,.pki img,.pki .sph{flex:none;width:34px;height:34px;border-radius:9px;object-fit:cover;display:grid;place-items:center;background:var(--sunk2);color:var(--ink3)}
+.sbn{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600;font-size:14px}
+.srole{flex:none;padding:1px 8px;border-radius:999px;font-size:11.5px;font-weight:700;background:var(--chip);color:var(--ink3)}
+.srole.official{background:var(--acc-bg);color:var(--acc-text)}
+.pkl{display:flex;flex-direction:column;gap:4px;max-height:50vh;overflow:auto}
+.pki{display:flex;align-items:center;gap:10px;padding:6px 8px;border:0;border-radius:10px;background:none;color:var(--ink);text-align:left;cursor:pointer}
+.pki:hover{background:var(--card2)}
+.pki b{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:14px}
 .login{position:fixed;inset:0;z-index:200;display:grid;place-items:center;padding:16px;background:var(--bg)}
 .lgbox{width:min(340px,100%);display:flex;flex-direction:column;gap:14px;padding:30px 26px;border-radius:20px;background:var(--card);border:1px solid var(--line)}
 .lgbox .inp{min-height:46px;font-size:16px}
@@ -685,16 +711,19 @@ const STCOL = {playing: '#F2B655', later: '#8FB8E8', done: '#5EC2B7'};
 // 자료 종류도 같은 식 (자료함 위 칸)
 const ITYPE = {module: '모듈', preset: '프리셋', lore: '로어북', plugin: '플러그인', etc: '기타'};
 const ITCOL = {};
+const STYPE = {cel: '셀화', paint: '두꺼운 칠', water: '수채', semi: '반실사', etc: '기타'};
+const STYCOL = {};
 function syncStatus() {
-  for (const [list, name, col] of [[S.state && S.state.statuses, STATUS, STCOL], [S.state && S.state.itypes, ITYPE, ITCOL]]) {
+  for (const [list, name, col] of [[S.state && S.state.statuses, STATUS, STCOL], [S.state && S.state.itypes, ITYPE, ITCOL], [S.state && S.state.stypes, STYPE, STYCOL]]) {
     if (!list || !list.length) continue;
     for (const o of [name, col]) for (const k of Object.keys(o)) delete o[k];
     for (const s of list) { name[s.key] = s.name; col[s.key] = s.color; }
   }
 }
-// 폴더: 서재 폴더(scope bot)와 자료함 폴더(item)는 따로 보임
-const botFolders = () => (S.state.folders || []).filter(f => f.scope !== 'item');
+// 폴더: 서재 폴더(scope bot) · 자료함 폴더(item) · 그림체 폴더(style)는 따로 보임
+const botFolders = () => (S.state.folders || []).filter(f => (f.scope || 'bot') === 'bot');
 const itemFolders = () => (S.state.folders || []).filter(f => f.scope === 'item');
+const styleFolders = () => (S.state.folders || []).filter(f => f.scope === 'style');
 const ss = {get: k => { try { return sessionStorage.getItem(k) || ''; } catch (e) { return ''; } }, set: (k, v) => { try { sessionStorage.setItem(k, v); } catch (e) {} }};
 const KIND = {card: '카드', module: '모듈', preset: '프리셋', lore: '로어북', plugin: '플러그인', images: '그림', regex: '정규식', memo: '메모', etc: '기타'};
 const KIND_EXT = {card: 'CARD', module: 'RISUM', preset: 'RISUP', lore: 'LORE', plugin: 'JS', images: 'IMG', regex: 'REGEX', memo: 'TXT', etc: 'FILE'};
@@ -724,6 +753,8 @@ const ICON = {
   book: '<path d="M5 4h11a3 3 0 0 1 3 3v13H8a3 3 0 0 1-3-3zM5 17a3 3 0 0 1 3-3h11"/>',
   plug: '<path d="M9 3v5M15 3v5M6 8h12v3a6 6 0 0 1-12 0zM12 17v4"/>',
   lock: '<rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>',
+  brush: '<path d="M18 3l3 3-9.5 9.5-3-3zM8.5 12.5 6 15c-1.7 1.7-1 4-3 5 3 .5 6-.3 7-2.5l1.5-2"/>',
+  copy: '<rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a1 1 0 0 1 1-1h10"/>',
   palette: '<path d="M12 3a9 9 0 1 0 0 18c1.1 0 1.6-.8 1.6-1.6 0-.9-.6-1.3-.6-2.1 0-.9.7-1.5 1.6-1.5H17a4 4 0 0 0 4-4c0-4.9-4-8.8-9-8.8z"/><circle cx="7.5" cy="11" r="1.2"/><circle cx="10" cy="7" r="1.2"/><circle cx="14.5" cy="7" r="1.2"/>',
 };
 const ic = (n, s = 18, w = 2) => `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="${w}" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICON[n]}</svg>`;
@@ -780,7 +811,7 @@ function cover(b, cls = '') {
   return `<div class="cv ${cls}" style="background:${tint(b.id || 0)}">${inner}`;
 }
 function folderChips(ids) {
-  return ids.map(folderById).filter(Boolean).map(f => `<a class="chip fc" href="${f.scope === 'item' ? `#/shelf" data-ifgo="${f.id}` : `#/f/${f.id}`}" style="--fc:${f.color}">${ic('folder', 14)}${h(f.name)}</a>`).join('');
+  return ids.map(folderById).filter(Boolean).map(f => `<a class="chip fc" href="${f.scope === 'item' ? `#/shelf" data-ifgo="${f.id}` : f.scope === 'style' ? `#/styles" data-sfgo="${f.id}` : `#/f/${f.id}`}" style="--fc:${f.color}">${ic('folder', 14)}${h(f.name)}</a>`).join('');
 }
 function folderDots(ids) {
   return ids.map(folderById).filter(Boolean).map(f => `<span class="fd"><i style="background:${f.color}"></i>${h(f.name)}</span>`).join('');
@@ -850,6 +881,7 @@ function renderSide() {
     <a class="nav" href="#/all"${cur('/all')}>${ic('all')}서재 전체<span class="n">${st.bots}</span></a>
     <a class="nav" href="#/chats"${cur('/chats')}>${ic('chat')}채팅 로그<span class="n">${st.chats}</span></a>
     <a class="nav" href="#/shelf"${cur('/shelf')}>${ic('box')}자료함<span class="n">${st.items}</span></a>
+    <a class="nav" href="#/styles"${cur('/styles')}>${ic('brush')}그림체<span class="n">${st.styles}</span></a>
     <div class="sideh">폴더<button class="ib" data-act="newfolder" aria-label="새 폴더">${ic('plus', 16)}</button></div>
     ${botFolders().map(f => `<a class="nav" href="#/f/${f.id}"${cur('/f/' + f.id)}><span class="dot" style="background:${f.color}"></span>${h(f.name)}<span class="n">${f.count}</span></a>`).join('')}
     <div class="grow"></div>
@@ -981,8 +1013,9 @@ applyTheme();
 
 // ---- 이름표 고치기: 봇 상태 · 자료 종류. 이름·색 바꾸기, 더하기, 더한 것 지우기 (기본은 못 지움) ----
 const LABEL = {
-  statuses: {title: '상태 고치기', sub: '서재 위 칸과 봇 페이지에 나와요', what: '상태', ph: '새 상태 이름 (예: 접음)', most: 12, to: () => STATUS.later},
-  itypes: {title: '자료 종류 고치기', sub: '자료함 위 칸과 자료 페이지에 나와요', what: '종류', ph: '새 종류 이름 (예: 테마)', most: 20, to: () => ITYPE.etc}};
+  statuses: {title: '상태 고치기', sub: '서재 위 칸과 봇 페이지에 나와요', what: '상태', unit: '봇', ph: '새 상태 이름 (예: 접음)', most: 12, to: () => STATUS.later},
+  itypes: {title: '자료 종류 고치기', sub: '자료함 위 칸과 자료 페이지에 나와요', what: '종류', unit: '자료', ph: '새 종류 이름 (예: 테마)', most: 20, to: () => ITYPE.etc},
+  stypes: {title: '그림체 분류 고치기', sub: '그림체 위 칸과 그림체 페이지에 나와요', what: '분류', unit: '그림체', ph: '새 분류 이름 (예: 픽셀)', most: 20, to: () => STYPE.etc}};
 const statusDialog = after => labelDialog('statuses', after);
 function labelDialog(t, after) {
   const L = LABEL[t];
@@ -997,12 +1030,12 @@ function labelDialog(t, after) {
     bd.innerHTML = `<div class="srows">${l.map(s => `<div class="srow" data-k="${h(s.key)}">
         <button type="button" class="sdot" style="background:${s.color}" aria-label="색 바꾸기" title="색 바꾸기"></button>
         <input class="inp" maxlength="12" value="${h(s.name)}" aria-label="${L.what} 이름">
-        <span class="meta">${t === 'itypes' ? '자료' : '봇'} ${s.count}</span>
+        <span class="meta">${L.unit} ${s.count}</span>
         ${s.builtin ? '<span class="meta sfix">기본</span>' : `<button class="ib danger" data-sdel aria-label="${h(s.name)} 지우기">${ic('trash', 16)}</button>`}
         <div class="colors" hidden>${S.state.colors.map(c => `<button type="button" style="background:${c}" data-c="${c}" aria-pressed="${c === s.color}" aria-label="${c}"></button>`).join('')}</div>
       </div>`).join('')}</div>
       ${l.length < L.most ? `<div class="srow sadd"><input class="inp" id="sNew" maxlength="12" placeholder="${L.ph}"><button class="btn sm" id="sAdd">${ic('plus', 15)}더하기</button></div>` : ''}
-      <p class="hint" style="margin:12px 0 0">더한 ${L.what}를 지우면 거기 있던 ${t === 'itypes' ? '자료' : '봇'}는 '${h(L.to())}'로 옮겨져요.</p>`;
+      <p class="hint" style="margin:12px 0 0">더한 ${L.what}를 지우면 거기 있던 ${L.unit}는 '${h(L.to())}'로 옮겨져요.</p>`;
     $$('.srow[data-k]', bd).forEach(r => {
       const k = r.dataset.k, s = l.find(x => x.key === k), inp = $('.inp', r);
       $('.sdot', r).onclick = () => { $('.colors', r).hidden = !$('.colors', r).hidden; };
@@ -1012,7 +1045,7 @@ function labelDialog(t, after) {
       inp.onkeydown = e => { if (e.key === 'Enter' && !e.isComposing) inp.blur(); };
       const del = $('[data-sdel]', r);
       if (del) del.onclick = async () => {
-        if (s.count && !await confirmBox(`${L.what} 지우기`, `<b>${h(s.name)}</b>을(를) 지울까요? 여기 있던 ${t === 'itypes' ? '자료' : '봇'} ${s.count}개는 '${h(L.to())}'로 옮겨져요.`)) return;
+        if (s.count && !await confirmBox(`${L.what} 지우기`, `<b>${h(s.name)}</b>을(를) 지울까요? 여기 있던 ${L.unit} ${s.count}개는 '${h(L.to())}'로 옮겨져요.`)) return;
         try { took(await api('DELETE', `/api/${t}/${k}`)); } catch (e) { fail(e); }
       };
     });
@@ -1038,7 +1071,7 @@ function folderDialog(f, scope = 'bot') {
         <label class="field">이름<input class="inp" id="fname" maxlength="20" value="${h(f ? f.name : '')}" placeholder="예: 운영 봇"></label>
         <div class="field">색<div class="colors">${S.state.colors.map(c => `<button type="button" style="background:${c}" data-c="${c}" aria-pressed="${c === color}" aria-label="${c}"></button>`).join('')}</div></div>
       </div>
-      <footer>${f ? `<button class="btn ghost danger" data-del>${ic('trash', 16)}폴더 지우기</button>` : ''}<span class="note">${f ? (scope === 'item' ? '폴더를 지워도 자료는 자료함에 남아요' : '폴더를 지워도 봇은 서재에 남아요') : ''}</span>
+      <footer>${f ? `<button class="btn ghost danger" data-del>${ic('trash', 16)}폴더 지우기</button>` : ''}<span class="note">${f ? ({item: '폴더를 지워도 자료는 자료함에 남아요', style: '폴더를 지워도 그림체는 남아요'}[scope] || '폴더를 지워도 봇은 서재에 남아요') : ''}</span>
         <button class="btn" data-close>취소</button><button class="btn pri" data-ok>${f ? '저장' : '만들기'}</button></footer>`, 'narrow');
     $$('.colors button', m).forEach(b => b.onclick = () => { color = b.dataset.c; $$('.colors button', m).forEach(x => x.setAttribute('aria-pressed', x === b)); });
     const ok = async () => {
@@ -1054,8 +1087,8 @@ function folderDialog(f, scope = 'bot') {
     const del = $('[data-del]', m);
     if (del) del.onclick = async () => {
       m.close();
-      if (!await confirmBox('폴더 지우기', `<b>${h(f.name)}</b> 폴더를 지울까요? ${scope === 'item' ? '안에 있던 자료는 자료함에' : '안에 있던 봇은 서재에'} 그대로 남아요.`)) return res(null);
-      try { await api('DELETE', `/api/folders/${f.id}`); await loadState(); if (scope === 'item') { ss.set('bs-ifolder', ''); route(); } else location.hash = '#/'; res(null); } catch (e) { fail(e); }
+      if (!await confirmBox('폴더 지우기', `<b>${h(f.name)}</b> 폴더를 지울까요? ${({item: '안에 있던 자료는 자료함에', style: '안에 있던 그림체는'}[scope]) || '안에 있던 봇은 서재에'} 그대로 남아요.`)) return res(null);
+      try { await api('DELETE', `/api/folders/${f.id}`); await loadState(); if (scope !== 'bot') { ss.set(scope === 'item' ? 'bs-ifolder' : 'bs-sfolder', ''); route(); } else location.hash = '#/'; res(null); } catch (e) { fail(e); }
     };
     $$('[data-close]', m).forEach(b => b.addEventListener('click', () => res(null)));
   });
@@ -1350,10 +1383,11 @@ async function viewMain() {
     <div class="mtop"><a class="logo" href="#/" aria-label="봇카이브 홈"><svg class="lgi" viewBox="0 0 64 64" aria-hidden="true"><rect class="l0" width="64" height="64" rx="16"/><rect class="ls" x="7" y="49" width="50" height="7" rx="3.5"/><rect class="l1" x="9" y="12" width="19" height="37" rx="5"/><circle class="le" cx="14.2" cy="23" r="3"/><circle class="le" cx="22.2" cy="23" r="3"/><rect class="l2" x="30" y="19" width="13" height="30" rx="4.5"/><rect class="l3" x="45" y="13" width="12" height="36" rx="4.5" transform="rotate(11 51 49)"/></svg><span class="lw"><b>봇</b>카이브<i>.</i></span></a>
       <a class="ib" href="#/chats" aria-label="채팅 로그" title="채팅 로그">${ic('chat', 20)}</a>
       <a class="ib" href="#/shelf" aria-label="자료함" title="자료함">${ic('box', 20)}</a>
+      <a class="ib" href="#/styles" aria-label="그림체" title="그림체">${ic('brush', 20)}</a>
       <button class="ib" data-act="theme" aria-label="테마" title="테마">${ic('palette', 20)}</button>
       <button class="ib" data-act="lock" aria-label="잠금" title="잠금 (로그인)">${ic('lock', 20)}</button>
       <button class="btn sm pri" data-act="add" style="margin-left:6px">${ic('plus', 16)}<span class="t">봇 들이기</span></button></div>
-    <div class="mhead"><div class="k">봇 ${bots.length} · 채팅 로그 ${st.chats} · 자료 ${st.items}</div>
+    <div class="mhead"><div class="k">봇 ${bots.length} · 채팅 로그 ${st.chats} · 자료 ${st.items} · 그림체 ${st.styles}</div>
       <h1>오늘은 누구를 꺼낼까요</h1>
       <p>${playing ? `지금 ${h(STATUS.playing)}인 봇이 ${playing}개 있어요.` : '리스에 다 넣어 두지 않아도, 여기 꽂아 두면 잊지 않아요.'}</p></div>
     <div class="mgrid">
@@ -1607,9 +1641,20 @@ function drawAside() {
         <div><b>${i.greetings}</b><span>첫 메시지</span></div><div><b>${h(i.version || '—')}</b><span>버전</span></div></div>
       ${i.tags && i.tags.length ? `<div class="tags">${i.tags.map(t => `<span class="tag">${h(t)}</span>`).join('')}</div>` : ''}
     </div>` : ''}
+    ${b.itype ? '' : `<div class="box"><h3>${ic('brush', 16)}그림체<button class="ib" id="bsAdd" aria-label="그림체 잇기" title="그림체 잇기">${ic('plus', 16)}</button></h3>
+      ${(b.styles || []).length ? `<div class="sbl">${b.styles.map(x => `<a class="sbr" href="#/s/${x.id}">${x.cover ? `<img src="/m/${h(x.cover)}" alt="" loading="lazy">` : `<span class="sph">${ic('brush', 16)}</span>`}
+        <span class="sbn">${h(x.name)}</span><span class="srole ${x.role}">${SROLE[x.role]}</span></a>`).join('')}</div>`
+        : '<p class="hint">공식 그림체나, 이 봇에 어울리는 그림체를 이어 두세요.</p>'}</div>`}
     <div class="box"><h3>내 메모<a class="ib" href="#/b/${b.id}/memo" data-rep aria-label="메모 쓰기">${ic('edit', 15)}</a></h3>
       ${b.memo ? `<div class="memo-pre">${h(b.memo)}</div>` : '<p class="hint">아직 메모가 없어요.</p>'}</div>`;
   $('#lkAdd').onclick = () => linkDialog();
+  if ($('#bsAdd')) $('#bsAdd').onclick = async () => {
+    let list; try { list = await api('GET', '/api/styles'); } catch (e) { return fail(e); }
+    const have = new Set((B.styles || []).map(x => x.id));
+    pickDialog({title: '그림체 잇기', sub: B.name, empty: '아직 그림체가 없어요. 왼쪽 목차의 그림체에서 먼저 들여 주세요.',
+      items: list.filter(x => !have.has(x.id)).map(x => ({id: x.id, name: x.name, cover: x.cover, sub: STYPE[x.stype] || ''})),
+      onPick: async (sid, role) => { await api('POST', `/api/styles/${sid}/bots`, {bot_id: B.id, role}); await viewBot(B.id, curTab()); }});
+  };
   $$('[data-peek]').forEach(x => x.onclick = () => { location.hash = `#/b/${B.id}/${x.dataset.peek}`; });
   $$('[data-le]').forEach(x => x.onclick = () => linkDialog(B.links.find(l => l.id === +x.dataset.le)));
 }
@@ -3026,6 +3071,326 @@ async function addItem(preType) {
   };
 }
 
+// ---- 그림체: 그림 생성 프롬프트(작가·스타일 태그) + 견본 그림. 분류 칸 + 그림체 전용 폴더, 봇과 잇기(공식·어울림), 파일로 나눠 주기 ----
+const SROLE = {official: '공식', mine: '어울림'};
+const SETL = {model: '모델', sampler: '샘플러', steps: '스텝', scale: '가이던스', cfg_rescale: '리스케일', noise_schedule: '노이즈 스케줄', size: '크기', extra: '그 밖의 설정'};
+document.addEventListener('click', e => { const a = e.target.closest('[data-sfgo]'); if (a) ss.set('bs-sfolder', a.dataset.sfgo); });
+async function copyText(t, what = '복사했어요') {
+  try { await navigator.clipboard.writeText(t); }
+  catch (e) {  // http(같은 와이파이 주소 등)에서는 clipboard API가 막혀 있어서 옛 방식으로
+    const ta = document.createElement('textarea'); ta.value = t; ta.style.cssText = 'position:fixed;opacity:0'; document.body.append(ta); ta.select();
+    try { document.execCommand('copy'); } catch (er) { ta.remove(); return toast('복사하지 못했어요', true); }
+    ta.remove();
+  }
+  toast(what);
+}
+// 그림 속 생성 정보: NAI(tEXt Comment JSON) · 스테이블 디퓨전 웹UI(parameters). 없으면 null
+async function genMeta(file) {
+  if (!/\.png$/i.test(file.name) && file.type !== 'image/png') return null;
+  const buf = new Uint8Array(await file.arrayBuffer());
+  if (buf[0] !== 0x89 || buf[1] !== 0x50) return null;
+  const dv = new DataView(buf.buffer), dec = new TextDecoder(), t = {};
+  for (let pos = 8; pos + 8 <= buf.length;) {
+    const len = dv.getUint32(pos), type = String.fromCharCode(...buf.subarray(pos + 4, pos + 8));
+    if (type === 'tEXt' || type === 'iTXt') {
+      const d = buf.subarray(pos + 8, pos + 8 + len), z = d.indexOf(0), k = dec.decode(d.subarray(0, z));
+      if (type === 'tEXt') t[k] = dec.decode(d.subarray(z + 1));
+      else if (!d[z + 1]) { let q = d.indexOf(0, z + 3) + 1; q = d.indexOf(0, q) + 1; t[k] = dec.decode(d.subarray(q)); }  // 압축 안 한 iTXt만
+    }
+    if (type === 'IEND') break;
+    pos += 12 + len;
+  }
+  if (t.Comment) {
+    let c; try { c = JSON.parse(t.Comment); } catch (e) { return null; }
+    const v4 = c.v4_prompt && c.v4_prompt.caption, n4 = c.v4_negative_prompt && c.v4_negative_prompt.caption;
+    const str = v => v == null || v === '' ? '' : String(v);
+    return {gen: 'NAI', prompt: (v4 && v4.base_caption) || c.prompt || t.Description || '', negative: (n4 && n4.base_caption) || c.uc || '',
+      chars: v4 && Array.isArray(v4.char_captions) ? v4.char_captions.map(x => x.char_caption).filter(Boolean) : [],
+      settings: {model: str(t.Source), sampler: str(c.sampler), steps: str(c.steps), scale: str(c.scale), cfg_rescale: str(c.cfg_rescale || ''),
+        noise_schedule: str(c.noise_schedule), size: c.width && c.height ? `${c.width}×${c.height}` : ''}};
+  }
+  if (t.parameters) {
+    const pr = t.parameters, ng = pr.indexOf('\nNegative prompt:'), st = pr.lastIndexOf('\nSteps:');
+    return {gen: 'SD', prompt: pr.slice(0, ng >= 0 ? ng : st >= 0 ? st : pr.length).trim(), negative: ng >= 0 ? pr.slice(ng + 17, st > ng ? st : pr.length).trim() : '',
+      settings: {extra: st >= 0 ? pr.slice(st + 1).trim().slice(0, 300) : ''}};
+  }
+  return null;
+}
+// 견본 그림 → 보낼 data URL (png·jpeg·webp는 원본 그대로 — NAI 그림을 다시 NAI에 끌어다 놓으면 설정이 불러와지게. 너무 크거나 다른 형식이면 줄임)
+const imgData = f => /^image\/(png|jpeg|webp)$/.test(f.type) && f.size <= 12e6
+  ? new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = () => rej(new Error('그림을 못 읽었어요')); r.readAsDataURL(f); })
+  : shrink(f, 2000, .9);
+const styleCover = (x, size = 44) => `<div class="cv" style="background:${tint(x.id || 0)}">${x.cover ? `<img src="/m/${h(x.cover)}" alt="" loading="lazy">` : `<span class="ph pi">${ic('brush', size, 1.4)}</span>`}`;
+// 고르기 창 (봇 ↔ 그림체 잇기 공용): 찾기 + 역할(공식·어울림)
+function pickDialog({title, sub, items, empty, onPick}) {
+  let role = 'mine';
+  const m = modal(`<header><h2>${h(title)}</h2><span>${h(sub || '')}</span>${xBtn}</header>
+    <div class="bd"><div class="field">어떤 그림체인가요<div class="seg" id="pkRole">${Object.entries(SROLE).map(([k, v]) => `<button type="button" class="pill" data-r="${k}" aria-pressed="${k === role}">${v}</button>`).join('')}</div></div>
+      <p class="hint" style="margin:0">공식은 봇 만든 사람이 쓴 그림체, 어울림은 내가 이 봇에 어울린다고 고른 그림체예요.</p>
+      ${items.length ? `<input class="inp" id="pkQ" placeholder="이름으로 찾기" autocomplete="off"><div class="pkl">${items.map(x => `<button type="button" class="pki" data-id="${x.id}" data-q="${h(x.name.toLowerCase())}">
+        ${x.cover ? `<img src="/m/${h(x.cover)}" alt="" loading="lazy">` : `<span class="sph">${ic('brush', 16)}</span>`}<b>${h(x.name)}</b><span class="meta">${h(x.sub || '')}</span></button>`).join('')}</div>`
+        : `<p class="hint">${h(empty)}</p>`}</div>`, 'narrow');
+  $$('#pkRole .pill', m).forEach(b => b.onclick = () => { role = b.dataset.r; $$('#pkRole .pill', m).forEach(x => x.setAttribute('aria-pressed', x === b)); });
+  if ($('#pkQ', m)) $('#pkQ', m).oninput = e => { const q = e.target.value.trim().toLowerCase(); $$('.pki', m).forEach(x => x.hidden = q && !x.dataset.q.includes(q)); };
+  $$('.pki', m).forEach(b => b.onclick = async () => { try { await onPick(+b.dataset.id, role); m.close(); toast('이었어요'); } catch (e) { fail(e); } });
+}
+async function viewStyles() {
+  const view = $('#view');
+  const list = await api('GET', '/api/styles');
+  list.sort(BSORT[bsort][1]);
+  const folders = styleFolders();
+  let type = STYPE[ss.get('bs-stype')] ? ss.get('bs-stype') : '';
+  let fold = folders.some(f => f.id === +ss.get('bs-sfolder')) ? +ss.get('bs-sfolder') : 0;
+  const counts = {}; list.forEach(x => counts[x.stype] = (counts[x.stype] || 0) + 1);
+  const card = x => `<a class="bc" href="#/s/${x.id}" data-it="${h(x.stype)}" data-f=" ${x.folders.join(' ')} " data-q="${h([x.name, x.creator, ...(x.tags || [])].join(' ').toLowerCase())}">
+      ${styleCover(x)}
+      <span class="st" style="color:${STYCOL[x.stype] || 'var(--ink3)'}">${h(STYPE[x.stype] || '기타')}</span>${x.nbots ? `<span class="cc" title="이은 봇 ${x.nbots}개">${ic('link', 14)}${x.nbots}</span>` : ''}</div>
+      <b>${h(x.name)}</b><span class="who">${[x.creator, `그림 ${x.nimg}`].filter(Boolean).map(h).join(' · ')}</span>
+      <span class="fl">${folderDots(x.folders)}</span></a>`;
+  view.innerHTML = `<div class="wrap">
+    <div class="toolbar" style="margin-bottom:26px"><span class="dot" style="width:16px;height:16px;border-radius:5px;background:var(--acc)"></span>
+      <h1 class="disp" style="margin:0;font-size:34px">그림체</h1><span class="meta" style="font-size:14px">그림체 ${list.length}</span>
+      <button class="btn sm ghost" id="sImp" style="margin-left:auto">${ic('dl', 16)}가져오기</button>
+      <button class="btn sm pri" data-sadd>${ic('plus', 16)}그림체 들이기</button></div>
+    ${list.length ? `<div class="toolbar">
+        <div class="seg" id="itSeg"><button class="pill" data-it="" aria-pressed="${!type}">전체<span class="c">${list.length}</span></button>
+          ${Object.entries(STYPE).map(([k, v]) => `<button class="pill" data-it="${k}" aria-pressed="${type === k}">${h(v)}<span class="c">${counts[k] || 0}</span></button>`).join('')}
+          <button class="ib" id="itEdit" aria-label="분류 고치기" title="분류 고치기 · 더하기">${ic('edit', 16)}</button></div>
+        <label class="search">${ic('search', 16)}<input id="q" placeholder="이름·만든 사람·태그 찾기" autocomplete="off"></label>
+        <select class="sortsel" id="bSort" aria-label="정렬">${Object.entries(BSORT).map(([k, [v]]) => `<option value="${k}"${k === bsort ? ' selected' : ''}>${v}</option>`).join('')}</select>
+        <label class="gsize" title="카드 크기">${ic('gsm', 14)}<input type="range" id="gSize" min="0" max="${GSIZE.length - 1}" step="1" value="${gsize}" aria-label="카드 크기">${ic('glg', 16)}</label>
+      </div>
+      <div class="tagbar" id="ifBar"><span class="meta">${ic('folder', 14)} 폴더</span>
+        ${folders.map(f => `<button class="pill ifp" data-if="${f.id}" aria-pressed="${fold === f.id}" style="--fc:${f.color}"><i></i>${h(f.name)}<span class="c">${f.count}</span></button>`).join('')}
+        <button class="btn sm ghost" id="ifEdit"${fold ? '' : ' hidden'}>${ic('edit', 14)}폴더 고치기</button>
+        <button class="btn sm ghost" id="ifNew">${ic('plus', 14)}${folders.length ? '' : '그림체 '}폴더</button>
+        <button class="btn sm ghost" id="sExp" style="margin-left:auto" title="지금 보이는 그림체를 파일 하나로">${ic('dl', 14)}보이는 것 내보내기</button></div>
+      <div class="grid" id="grid">${list.map(card).join('')}</div>
+      <p class="hint" id="noHit" hidden style="padding:30px 0;text-align:center">맞는 그림체가 없어요</p>`
+    : `<div class="empty"><h3>아직 그림체가 없어요</h3><p>NAI로 뽑은 그림(PNG)을 넣으면 프롬프트·설정을 알아서 읽어 와요. 받은 그림체 파일(.botkive-style.json)은 '가져오기'로 넣어요.</p><button class="btn pri" data-sadd>${ic('plus')}그림체 들이기</button></div>`}
+  </div>`;
+  $$('[data-sadd]').forEach(x => x.onclick = () => addStyle(type));
+  $('#sImp').onclick = importStyles;
+  if (!list.length) return;
+  const filter = () => {
+    const q = $('#q').value.trim().toLowerCase();
+    let n = 0;
+    $$('#grid .bc').forEach(c => { const ok = (!type || c.dataset.it === type) && (!fold || c.dataset.f.includes(` ${fold} `)) && (!q || c.dataset.q.includes(q)); c.hidden = !ok; n += ok; });
+    $('#noHit').hidden = n > 0;
+  };
+  $('#itEdit').onclick = () => labelDialog('stypes', route);
+  $$('#itSeg .pill').forEach(b => b.onclick = () => { type = b.dataset.it; ss.set('bs-stype', type); $$('#itSeg .pill').forEach(x => x.setAttribute('aria-pressed', x === b)); filter(); });
+  $$('#ifBar [data-if]').forEach(b => b.onclick = () => {
+    fold = fold === +b.dataset.if ? 0 : +b.dataset.if; ss.set('bs-sfolder', fold || '');
+    $$('#ifBar [data-if]').forEach(x => x.setAttribute('aria-pressed', +x.dataset.if === fold)); $('#ifEdit').hidden = !fold; filter();
+  });
+  $('#ifEdit').onclick = () => folderDialog(folderById(fold)).then(() => loadState().then(route));
+  $('#ifNew').onclick = () => folderDialog(null, 'style').then(f => f && loadState().then(route));
+  $('#sExp').onclick = () => {
+    const ids = $$('#grid .bc').filter(c => !c.hidden).map(c => c.getAttribute('href').split('/').pop());
+    if (!ids.length) return toast('내보낼 그림체가 없어요', true);
+    location.href = `/api/styles/export?ids=${ids.join(',')}`;
+  };
+  $('#q').addEventListener('input', filter);
+  $('#bSort').onchange = e => {
+    bsort = e.target.value; try { localStorage.setItem('bs-sort', bsort); } catch (er) {}
+    const g = $('#grid'), byId = new Map($$('.bc', g).map(c => [c.getAttribute('href'), c]));
+    list.sort(BSORT[bsort][1]).forEach(x => g.append(byId.get(`#/s/${x.id}`)));
+  };
+  applyGsize($('#grid'));
+  $('#gSize').oninput = e => { gsize = +e.target.value; try { localStorage.setItem('bs-size', gsize); } catch (er) {} applyGsize($('#grid')); };
+  filter();
+}
+async function importStyles() {
+  const [f] = await pick('.json,application/json');
+  if (!f) return;
+  try {
+    const d = JSON.parse(await f.text());
+    const r = await api('POST', '/api/styles/import', d);
+    await loadState();
+    if (r.ids.length === 1) location.hash = `#/s/${r.ids[0]}`; else route();
+    toast(`그림체 ${r.ids.length}개를 가져왔어요`);
+  } catch (e) { fail(e instanceof SyntaxError ? new Error('그림체 파일을 읽지 못했어요') : e); }
+}
+// 그림체 만들기·고치기 창 (만들 때는 견본 그림도)
+function styleForm(x) {
+  const st = x.settings || {};
+  return `<div class="row" style="flex-wrap:nowrap;gap:12px">
+      <label class="field" style="flex:2">이름<input class="inp" id="sfName" maxlength="200" value="${h(x.name || '')}" placeholder="예: 맑은 수채 · ○○ 작가풍"></label>
+      <label class="field" style="flex:1">만든 사람<input class="inp" id="sfWho" maxlength="200" value="${h(x.creator || '')}" placeholder="나"></label></div>
+    <div class="field">분류<div class="seg" id="sfType">${Object.entries(STYPE).map(([k, v]) => `<button type="button" class="pill" data-t="${k}" aria-pressed="${(x.stype || 'etc') === k}">${h(v)}</button>`).join('')}</div></div>
+    <label class="field">프롬프트 <span class="meta">작가·스타일 태그만 남기면 복사해 쓰기 좋아요</span><textarea class="inp sfta" id="sfPrompt" placeholder="예: artist:xxx, watercolor, soft lighting">${h(x.prompt || '')}</textarea></label>
+    <label class="field">네거티브<textarea class="inp sfta" id="sfNeg" style="min-height:64px">${h(x.negative || '')}</textarea></label>
+    <div class="sfset">${['model', 'sampler', 'steps', 'scale'].map(k => `<label class="field">${SETL[k]}<input class="inp" data-set="${k}" value="${h(st[k] || '')}"></label>`).join('')}</div>
+    <details${Object.keys(st).some(k => !['model', 'sampler', 'steps', 'scale'].includes(k)) || x.source || x.memo ? ' open' : ''}><summary class="meta" style="cursor:pointer">더 적기 (설정 · 출처 · 메모)</summary>
+      <div style="display:flex;flex-direction:column;gap:12px;margin-top:12px">
+        <div class="sfset">${['cfg_rescale', 'noise_schedule', 'size'].map(k => `<label class="field">${SETL[k]}<input class="inp" data-set="${k}" value="${h(st[k] || '')}"></label>`).join('')}</div>
+        <label class="field">${SETL.extra}<input class="inp" data-set="extra" value="${h(st.extra || '')}"></label>
+        <label class="field">출처 주소<input class="inp" id="sfSrc" maxlength="1000" value="${h(x.source || '')}" placeholder="https://"></label>
+        <label class="field">태그 <span class="meta">쉼표로 나눠요</span><input class="inp" id="sfTags" value="${h((x.tags || []).join(', '))}"></label>
+        <label class="field">메모<textarea class="inp sfta" id="sfMemo" style="min-height:64px">${h(x.memo || '')}</textarea></label>
+      </div></details>`;
+}
+function readStyleForm(m, stype) {
+  const settings = {};
+  $$('[data-set]', m).forEach(i => { if (i.value.trim()) settings[i.dataset.set] = i.value.trim(); });
+  return {name: $('#sfName', m).value.trim(), creator: $('#sfWho', m).value.trim(), stype, prompt: $('#sfPrompt', m).value.trim(), negative: $('#sfNeg', m).value.trim(), settings,
+    source: $('#sfSrc', m).value.trim(), memo: $('#sfMemo', m).value.trim(), tags: $('#sfTags', m).value.split(',').map(t => t.trim()).filter(Boolean)};
+}
+function fillFromMeta(m, meta) {  // 비어 있는 칸만 채움
+  if (!meta) return;
+  if (!$('#sfPrompt', m).value.trim()) $('#sfPrompt', m).value = meta.prompt || '';
+  if (!$('#sfNeg', m).value.trim()) $('#sfNeg', m).value = meta.negative || '';
+  for (const [k, v] of Object.entries(meta.settings || {})) { const i = $(`[data-set="${k}"]`, m); if (i && !i.value.trim() && v) i.value = v; }
+  if (Object.entries(meta.settings || {}).some(([k, v]) => v && !['model', 'sampler', 'steps', 'scale'].includes(k))) $('details', m).open = true;
+}
+async function addStyle(preType) {
+  let pics = [], stype = STYPE[preType] ? preType : 'etc';
+  const chosen = new Set(), fold = +ss.get('bs-sfolder');
+  if (fold && styleFolders().some(f => f.id === fold)) chosen.add(fold);
+  const m = modal(`<header><h2>그림체 들이기</h2><span>견본 그림 + 프롬프트</span>${xBtn}</header>
+    <div class="bd">
+      <div class="drop" id="sfDrop" tabindex="0" role="button"><span style="color:var(--acc)">${ic('img', 26, 1.6)}</span><b>견본 그림을 끌어다 놓거나 눌러서 고르기</b><span>NAI·웹UI로 뽑은 PNG면 프롬프트·설정을 알아서 채워요 · 여러 장도 돼요</span></div>
+      <div class="simgs sm" id="sfPics"></div>
+      ${styleForm({stype})}
+      <div><p class="legend">그림체 폴더<span>안 골라도 돼요</span></p><div class="ftiles" id="sfFolders"></div></div>
+    </div>
+    <footer><span class="note" id="sfNote"></span><button class="btn" data-close>취소</button><button class="btn pri" id="sfOk">넣기</button></footer>`);
+  const draw = () => {
+    $('#sfPics', m).innerHTML = pics.map((x, i) => `<div class="sim"><img src="${x.url}" alt="">${x.meta ? `<span class="sgen">${h(x.meta.gen)}</span>` : ''}<button class="ib" data-rm="${i}" aria-label="빼기">${ic('x', 14)}</button></div>`).join('');
+    $$('[data-rm]', m).forEach(b => b.onclick = () => { URL.revokeObjectURL(pics[+b.dataset.rm].url); pics.splice(+b.dataset.rm, 1); draw(); });
+  };
+  const add = async fs => {
+    for (const f of fs.filter(f => f.type.startsWith('image/'))) {
+      const meta = await genMeta(f).catch(() => null);
+      pics.push({file: f, url: URL.createObjectURL(f), meta});
+      fillFromMeta(m, meta);
+    }
+    draw();
+    $('#sfNote', m).textContent = pics.some(x => x.meta) ? '그림에서 프롬프트를 읽었어요 — 작가·스타일 태그만 남겨 두면 좋아요' : '';
+  };
+  const dz = $('#sfDrop', m);
+  dz.onclick = async () => add(await pick('image/*', true));
+  dz.onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); dz.click(); } };
+  dropZone(dz, add);
+  $$('#sfType .pill', m).forEach(b => b.onclick = () => { stype = b.dataset.t; $$('#sfType .pill', m).forEach(x => x.setAttribute('aria-pressed', x === b)); });
+  folderTiles($('#sfFolders', m), chosen, 'style');
+  $('#sfOk', m).onclick = async () => {
+    const v = readStyleForm(m, stype), btn = $('#sfOk', m);
+    if (!v.name) return toast('이름을 적어 주세요', true);
+    btn.disabled = true; btn.textContent = '넣는 중…';
+    try {
+      const images = await Promise.all(pics.map(async x => ({data: await imgData(x.file), meta: x.meta || {}})));
+      const d = await api('POST', '/api/styles', {...v, folders: [...chosen], images});
+      pics.forEach(x => URL.revokeObjectURL(x.url));
+      m.close(); await loadState(); location.hash = `#/s/${d.id}`; toast(`${d.name}을(를) 넣었어요`);
+    } catch (e) { fail(e); btn.disabled = false; btn.textContent = '넣기'; }
+  };
+}
+let SY = null;
+async function viewStyle(id) {
+  const fresh = !SY || SY.id !== id;
+  try { SY = await api('GET', `/api/styles/${id}${fresh ? '?open=1' : ''}`); }
+  catch (e) { $('#view').innerHTML = `<div class="wrap"><div class="empty"><h3>그림체가 없어요</h3><a class="btn" href="#/styles">그림체로</a></div></div>`; return; }
+  drawStyle();
+}
+function drawStyle() {
+  const x = SY, cov = x.images[0];
+  const set = Object.entries(x.settings || {}).filter(([, v]) => v);
+  $('#view').innerHTML = `<div class="wrap">
+    <button class="backbtn" id="syBack">${ic('back', 16)}뒤로</button>
+    <section class="bhero">${cov ? `<div class="bgblur" style="background-image:url('/m/${h(cov.image)}')"></div>` : ''}
+      ${styleCover({id: x.id, cover: cov && cov.image}, 56)}</div>
+      <div style="flex:1;min-width:0">
+        <h1>${h(x.name)}</h1>
+        <p class="who">${x.creator ? h(x.creator) + ' · ' : ''}${day(x.created)}에 넣음 · 그림 ${x.images.length}</p>
+        <div class="row">${folderChips(x.folders)}<button class="btn sm ghost" id="syFolders">${ic('folder', 16)}폴더 바꾸기</button></div>
+        <div class="row"><div class="seg" id="syType">${Object.entries(STYPE).map(([k, v]) => `<button class="pill" data-t="${k}" aria-pressed="${x.stype === k}">${h(v)}</button>`).join('')}
+          <button class="ib" id="syTyEdit" aria-label="분류 고치기" title="분류 고치기 · 더하기">${ic('edit', 16)}</button></div></div>
+        ${x.tags.length ? `<div class="row btags">${x.tags.map(t => `<span class="btag"><span>#${h(t)}</span></span>`).join('')}</div>` : ''}
+        <div class="row" style="margin-top:18px">
+          <button class="btn sm pri" id="syCopy"${x.prompt ? '' : ' disabled'}>${ic('copy', 16)}프롬프트 복사</button>
+          <button class="btn sm ghost" id="syEdit">${ic('edit', 16)}고치기</button>
+          <a class="btn sm ghost" href="/api/styles/export?ids=${x.id}">${ic('dl', 16)}파일로 내보내기</a>
+          <button class="btn sm ghost danger" id="syDel">${ic('trash', 16)}지우기</button>
+        </div>
+      </div>
+    </section>
+    <div class="cols"><div style="min-width:0;display:flex;flex-direction:column;gap:18px">
+      <div class="box"><h3>프롬프트${x.prompt ? `<button class="ib" data-cp="prompt" aria-label="프롬프트 복사" title="복사">${ic('copy', 16)}</button>` : ''}</h3>
+        ${x.prompt ? `<pre class="sprm">${h(x.prompt)}</pre>` : '<p class="hint">아직 프롬프트가 없어요. 고치기에서 넣어 주세요.</p>'}
+        ${x.negative ? `<h3 style="margin-top:18px">네거티브<button class="ib" data-cp="negative" aria-label="네거티브 복사" title="복사">${ic('copy', 16)}</button></h3><pre class="sprm">${h(x.negative)}</pre>` : ''}
+        ${set.length ? `<div class="kv sset">${set.map(([k, v]) => `<div><b>${h(v)}</b><span>${h(SETL[k] || k)}</span></div>`).join('')}</div>` : ''}</div>
+      <div class="box"><h3>견본 그림 <span class="meta" style="font-weight:500">${x.images.length}</span><button class="ib" id="syImg" aria-label="그림 더하기" title="그림 더하기">${ic('plus', 16)}</button></h3>
+        ${x.images.length ? `<div class="simgs">${x.images.map((g, i) => `<div class="sim" data-g="${g.id}"><img src="/m/${h(g.image)}" alt="" loading="lazy" data-lb="${h(g.image)}">
+          ${i === 0 ? '<span class="sgen">대표</span>' : ''}
+          <div class="simb">${i ? `<button class="ib" data-front aria-label="대표로" title="대표 그림으로">${ic('star', 14)}</button>` : ''}${g.meta && g.meta.prompt ? `<button class="ib" data-gp aria-label="이 그림 프롬프트" title="이 그림의 프롬프트 복사">${ic('copy', 14)}</button>` : ''}<button class="ib" data-gdel aria-label="지우기" title="지우기">${ic('trash', 14)}</button></div></div>`).join('')}</div>`
+          : '<p class="hint">견본 그림을 더해 두면 어떤 그림체인지 한눈에 보여요.</p>'}</div>
+    </div><aside style="display:flex;flex-direction:column;gap:18px">
+      <div class="box"><h3>${ic('link', 16)}이 그림체를 쓰는 봇<button class="ib" id="syBot" aria-label="봇 잇기" title="봇 잇기">${ic('plus', 16)}</button></h3>
+        ${x.bots.length ? `<div class="sbl">${x.bots.map(b => `<div class="sbr"><a href="#/b/${b.id}" class="sbr">${b.cover ? `<img src="/m/${h(b.cover)}" alt="" loading="lazy">` : `<span class="sph">${h([...(b.name || '?')][0])}</span>`}<span class="sbn">${h(b.name)}</span></a>
+          <span class="srole ${b.role}">${SROLE[b.role]}</span><button class="ib" data-unb="${b.id}" aria-label="잇기 풀기" title="잇기 풀기">${ic('x', 14)}</button></div>`).join('')}</div>`
+          : '<p class="hint">이 그림체가 공식인 봇이나, 어울리는 봇을 이어 두세요.</p>'}</div>
+      ${x.source || x.memo ? `<div class="box"><h3>메모</h3>${x.source ? `<p style="margin:0 0 8px"><a href="${h(x.source)}" target="_blank" rel="noopener noreferrer">출처 열기 ↗</a></p>` : ''}${x.memo ? `<div class="memo-pre" style="max-height:none;-webkit-mask-image:none">${h(x.memo)}</div>` : ''}</div>` : ''}
+    </aside></div>
+  </div>`;
+  const reload = async d => { SY = d || await api('GET', `/api/styles/${x.id}`); drawStyle(); };
+  $('#syBack').onclick = () => navStack.length > 1 ? history.back() : (location.hash = '#/styles');
+  $('#syCopy').onclick = () => copyText(x.prompt, '프롬프트를 복사했어요');
+  $$('[data-cp]').forEach(b => b.onclick = () => copyText(x[b.dataset.cp], b.dataset.cp === 'prompt' ? '프롬프트를 복사했어요' : '네거티브를 복사했어요'));
+  $$('#syType .pill').forEach(b => b.onclick = async () => { try { await reload(await api('PUT', `/api/styles/${x.id}`, {stype: b.dataset.t})); loadState(); } catch (e) { fail(e); } });
+  $('#syTyEdit').onclick = () => labelDialog('stypes', () => viewStyle(x.id));
+  $('#syFolders').onclick = () => {
+    const chosen = new Set(x.folders);
+    const m = modal(`<header><h2>폴더 바꾸기</h2><span>${h(x.name)}</span>${xBtn}</header><div class="bd"><div class="ftiles" id="mf"></div></div>
+      <footer><span class="note">여러 곳에 같이 넣을 수 있어요</span><button class="btn" data-close>취소</button><button class="btn pri" data-ok>저장</button></footer>`);
+    folderTiles($('#mf', m), chosen, 'style');
+    $('[data-ok]', m).onclick = async () => { try { await reload(await api('PUT', `/api/styles/${x.id}`, {folders: [...chosen]})); m.close(); loadState(); } catch (e) { fail(e); } };
+  };
+  $('#syEdit').onclick = () => {
+    let stype = x.stype;
+    const m = modal(`<header><h2>그림체 고치기</h2>${xBtn}</header><div class="bd">${styleForm(x)}</div>
+      <footer><span class="note"></span><button class="btn" data-close>취소</button><button class="btn pri" data-ok>저장</button></footer>`);
+    $$('#sfType .pill', m).forEach(b => b.onclick = () => { stype = b.dataset.t; $$('#sfType .pill', m).forEach(y => y.setAttribute('aria-pressed', y === b)); });
+    $('[data-ok]', m).onclick = async () => {
+      const v = readStyleForm(m, stype);
+      if (!v.name) return toast('이름을 적어 주세요', true);
+      try { await reload(await api('PUT', `/api/styles/${x.id}`, v)); m.close(); loadState(); toast('저장했어요'); } catch (e) { fail(e); }
+    };
+  };
+  $('#syDel').onclick = async () => {
+    if (!await confirmBox('그림체 지우기', `<b>${h(x.name)}</b>을(를) 지울까요? 견본 그림 ${x.images.length}장이 함께 지워지고, 이은 봇에서도 빠져요. 되돌릴 수 없어요.`)) return;
+    try { await api('DELETE', `/api/styles/${x.id}`); SY = null; await loadState(); location.hash = '#/styles'; toast('지웠어요'); } catch (e) { fail(e); }
+  };
+  $('#syImg').onclick = async () => {
+    const fs = await pick('image/*', true);
+    if (!fs.length) return;
+    try {
+      const images = await Promise.all(fs.map(async f => ({data: await imgData(f), meta: await genMeta(f).catch(() => null) || {}})));
+      await reload(await api('POST', `/api/styles/${x.id}/images`, {images})); toast(`${fs.length}장 더했어요`);
+    } catch (e) { fail(e); }
+  };
+  $$('[data-lb]').forEach(i => i.onclick = () => lightbox('/m/' + i.dataset.lb));
+  $$('.sim[data-g]').forEach(el => {
+    const g = x.images.find(y => y.id === +el.dataset.g);
+    const f = $('[data-front]', el), gp = $('[data-gp]', el);
+    if (f) f.onclick = async () => { try { await reload(await api('PUT', `/api/style_images/${g.id}`, {front: true})); } catch (e) { fail(e); } };
+    if (gp) gp.onclick = () => copyText(g.meta.prompt, '이 그림의 프롬프트를 복사했어요');
+    $('[data-gdel]', el).onclick = async () => {
+      if (!await confirmBox('그림 지우기', '이 견본 그림을 지울까요?')) return;
+      try { await reload(await api('DELETE', `/api/style_images/${g.id}`)); } catch (e) { fail(e); }
+    };
+  });
+  $('#syBot').onclick = async () => {
+    let bots; try { bots = await api('GET', '/api/bots'); } catch (e) { return fail(e); }
+    const have = new Set(x.bots.map(b => b.id));
+    pickDialog({title: '봇 잇기', sub: x.name, empty: '서재에 봇이 없어요.',
+      items: bots.filter(b => !have.has(b.id)).sort((a, b) => a.name.localeCompare(b.name, 'ko')).map(b => ({id: b.id, name: b.name, cover: b.cover, sub: b.creator})),
+      onPick: async (bid, role) => reload(await api('POST', `/api/styles/${x.id}/bots`, {bot_id: bid, role}))});
+  };
+  $$('[data-unb]').forEach(b => b.onclick = async () => { try { await reload(await api('DELETE', `/api/styles/${x.id}/bots/${b.dataset.unb}`)); } catch (e) { fail(e); } });
+}
+
 // ---- 파일 모아 보기 (봇에 딸린 파일 · 예전 칸 파일) ----
 async function viewShelf(sid) {
   if (!sid) return viewItems();
@@ -3106,6 +3471,8 @@ async function route() {
     if (r[0] === 'c' && r[1]) return await viewChat(+r[1]);
     if (r[0] === 'chats') return await viewChats();
     if (r[0] === 'shelf') return await viewShelf(r[1]);
+    if (r[0] === 'styles') return await viewStyles();
+    if (r[0] === 's' && r[1]) return await viewStyle(+r[1]);
     replaceHash('#/');
   } catch (e) {
     $('#view').innerHTML = `<div class="wrap"><div class="empty"><h3>못 불러왔어요</h3><p>${h(e.message)}</p><a class="btn" href="#/">서재로</a></div></div>`;

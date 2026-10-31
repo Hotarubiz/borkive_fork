@@ -32,6 +32,11 @@ API (JSON):
   PUT    /api/upload?bot=&version=|shelf=&kind=&name=    파일 원본(본문 그대로)
   GET    /api/files?all=1   PUT|DELETE /api/files/<id>
   GET    /api/chats?bot=    POST /api/chats    GET|PUT|DELETE /api/chats/<id>
+  GET    /api/styles   GET|PUT|DELETE /api/styles/<id>   POST /api/styles {name, stype, prompt, negative, settings, images: [{data, meta}], folders, tags…}
+  POST   /api/styles/<id>/images {images}   PUT|DELETE /api/style_images/<id> ({front: true} = 대표 그림)
+  POST   /api/styles/<id>/bots {bot_id, role: official|mine}   DELETE /api/styles/<id>/bots/<bot_id>   그림체 ↔ 봇 잇기
+  GET    /api/styles/export?ids=1,2      그림체 파일(.botkive-style.json, 그림 포함)   POST /api/styles/import (그 파일 내용)
+         그림체 = 그림 생성 프롬프트(작가·스타일 태그) + 견본 그림. 분류 stypes(이름표), 폴더 scope style.
   GET    /api/auth   PUT /api/auth {mode, current, password}   POST /api/auth/login {password}   POST /api/auth/logout
   PUT    /api/marks                      {chat_id, idx, on, memo, image, drop_image} 장면 표시
   GET    /api/health
@@ -96,7 +101,11 @@ UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like 
 
 DEFAULT_ITYPES = [("module", "모듈", "#B9A6F5"), ("preset", "프리셋", "#7FD1E8"), ("lore", "로어북", "#C9A27A"),
                   ("plugin", "플러그인", "#9CCB6E"), ("etc", "기타", "#C7C5CC")]  # 자료 종류 기본 (키 고정, etc는 지운 종류가 가는 곳)
-LABELS = {"statuses": ("상태", 12, "s"), "itypes": ("종류", 20, "t")}  # 이름표 표: 부를 이름, 최대 개수, 더한 키 앞글자
+DEFAULT_STYPES = [("cel", "셀화", "#8FB8E8"), ("paint", "두꺼운 칠", "#C9A27A"), ("water", "수채", "#7FD1E8"),
+                  ("semi", "반실사", "#E89BCB"), ("etc", "기타", "#C7C5CC")]  # 그림체 분류 기본 (etc는 지운 분류가 가는 곳)
+LABELS = {"statuses": ("상태", 12, "s"), "itypes": ("종류", 20, "t"), "stypes": ("분류", 20, "g")}  # 이름표 표: 부를 이름, 최대 개수, 더한 키 앞글자
+LABEL_MOVE = {"statuses": ("bots", "status", "later"), "itypes": ("bots", "itype", "etc"), "stypes": ("styles", "stype", "etc")}  # 지울 때 옮길 곳
+STYLE_FIELDS = {"name": 200, "creator": 200, "source": 1000, "prompt": 20000, "negative": 20000, "memo": 20000}  # 글자 수 한도
 DEFAULT_STATUSES = [("playing", "하는 중", "#F2B655"), ("later", "찜", "#8FB8E8"), ("done", "끝", "#5EC2B7")]  # 키는 고정 (홈이 playing을 씀)
 KINDS = {"card", "module", "preset", "lore", "plugin", "images", "regex", "memo", "etc"}
 COLORS = {"#F2B655", "#5EC2B7", "#B9A6F5", "#8FB8E8", "#F08A8A", "#9CCB6E", "#E89BCB", "#C9A27A", "#7FD1E8", "#C7C5CC"}
@@ -116,8 +125,14 @@ JSON_COLS = {"info"}
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS folders (id INTEGER PRIMARY KEY, name TEXT NOT NULL, color TEXT, sort INTEGER DEFAULT 0, created TEXT);
+CREATE TABLE IF NOT EXISTS stypes (key TEXT PRIMARY KEY, name TEXT NOT NULL, color TEXT, sort INTEGER DEFAULT 0, builtin INTEGER DEFAULT 0);
 CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT);
 CREATE TABLE IF NOT EXISTS sessions (token TEXT PRIMARY KEY, created TEXT, expires REAL);
+CREATE TABLE IF NOT EXISTS styles (id INTEGER PRIMARY KEY, name TEXT NOT NULL, creator TEXT DEFAULT '', source TEXT DEFAULT '', stype TEXT DEFAULT 'etc',
+  prompt TEXT DEFAULT '', negative TEXT DEFAULT '', settings TEXT DEFAULT '{}', memo TEXT DEFAULT '', tags TEXT DEFAULT '[]', created TEXT, updated TEXT, opened TEXT);
+CREATE TABLE IF NOT EXISTS style_images (id INTEGER PRIMARY KEY, style_id INTEGER REFERENCES styles(id) ON DELETE CASCADE, image TEXT, sort INTEGER DEFAULT 0, meta TEXT DEFAULT '{}', created TEXT);
+CREATE TABLE IF NOT EXISTS style_folders (style_id INTEGER REFERENCES styles(id) ON DELETE CASCADE, folder_id INTEGER REFERENCES folders(id) ON DELETE CASCADE, PRIMARY KEY (style_id, folder_id));
+CREATE TABLE IF NOT EXISTS bot_styles (bot_id INTEGER REFERENCES bots(id) ON DELETE CASCADE, style_id INTEGER REFERENCES styles(id) ON DELETE CASCADE, role TEXT DEFAULT 'mine', PRIMARY KEY (bot_id, style_id));
 CREATE TABLE IF NOT EXISTS itypes (key TEXT PRIMARY KEY, name TEXT NOT NULL, color TEXT, sort INTEGER DEFAULT 0, builtin INTEGER DEFAULT 0);
 CREATE TABLE IF NOT EXISTS statuses (key TEXT PRIMARY KEY, name TEXT NOT NULL, color TEXT, sort INTEGER DEFAULT 0, builtin INTEGER DEFAULT 0);
 CREATE TABLE IF NOT EXISTS shelves (id INTEGER PRIMARY KEY, name TEXT NOT NULL, sort INTEGER DEFAULT 0, created TEXT);
@@ -244,6 +259,9 @@ class DB:
             self.c.execute("ALTER TABLE bots ADD COLUMN itype TEXT DEFAULT ''")
         if "scope" not in [r["name"] for r in self.c.execute("PRAGMA table_info(folders)")]:  # 서재 폴더(bot) · 자료함 폴더(item)
             self.c.execute("ALTER TABLE folders ADD COLUMN scope TEXT DEFAULT 'bot'")
+        if not self.c.execute("SELECT 1 FROM stypes LIMIT 1").fetchone():
+            for i, (k, n, col) in enumerate(DEFAULT_STYPES):
+                self.c.execute("INSERT INTO stypes(key, name, color, sort, builtin) VALUES (?,?,?,?,1)", (k, n, col, i))
         if not self.c.execute("SELECT 1 FROM itypes LIMIT 1").fetchone():
             for i, (k, n, col) in enumerate(DEFAULT_ITYPES):
                 self.c.execute("INSERT INTO itypes(key, name, color, sort, builtin) VALUES (?,?,?,?,1)", (k, n, col, i))
@@ -697,6 +715,125 @@ def tags_of(raw):
     return [str(x) for x in t if str(x)] if isinstance(t, list) else []
 
 
+# ---- 그림체 ----
+def style_rows():
+    rows = db.q("""SELECT s.id, s.name, s.creator, s.stype, s.tags, s.created, s.updated, s.opened,
+                     (SELECT image FROM style_images i WHERE i.style_id=s.id ORDER BY sort, id LIMIT 1) AS cover,
+                     (SELECT COUNT(*) FROM style_images i WHERE i.style_id=s.id) AS nimg,
+                     (SELECT COUNT(*) FROM bot_styles b WHERE b.style_id=s.id) AS nbots
+                   FROM styles s ORDER BY COALESCE(s.opened, s.updated) DESC""")
+    fm = {}
+    for r in db.q("SELECT style_id, folder_id FROM style_folders"):
+        fm.setdefault(r["style_id"], []).append(r["folder_id"])
+    for r in rows:
+        r["tags"] = tags_of(r["tags"])
+        r["folders"] = fm.get(r["id"], [])
+    return rows
+
+
+def style_detail(id):
+    r = db.q("SELECT * FROM styles WHERE id=?", (id,))
+    if not r:
+        return None
+    s = r[0]
+    s["tags"] = tags_of(s["tags"])
+    try:
+        s["settings"] = json.loads(s["settings"] or "{}")
+    except ValueError:
+        s["settings"] = {}
+    s["images"] = db.q("SELECT id, image, meta FROM style_images WHERE style_id=? ORDER BY sort, id", (id,))
+    for i in s["images"]:
+        try:
+            i["meta"] = json.loads(i["meta"] or "{}")
+        except ValueError:
+            i["meta"] = {}
+    s["folders"] = [x["folder_id"] for x in db.q("SELECT folder_id FROM style_folders WHERE style_id=?", (id,))]
+    s["bots"] = db.q("""SELECT b.id, b.name, b.cover, bs.role FROM bot_styles bs JOIN bots b ON b.id=bs.bot_id
+                        WHERE bs.style_id=? ORDER BY bs.role='official' DESC, b.name""", (id,))
+    return s
+
+
+def style_vals(d):
+    vals = {k: str(d[k] or "").strip()[:n] for k, n in STYLE_FIELDS.items() if k in d}
+    if "name" in vals and not vals["name"]:
+        del vals["name"]
+    if "stype" in d and db.q("SELECT 1 FROM stypes WHERE key=?", (str(d["stype"]),)):
+        vals["stype"] = str(d["stype"])
+    if isinstance(d.get("settings"), dict):
+        vals["settings"] = json.dumps({str(k)[:40]: str(v)[:300] for k, v in list(d["settings"].items())[:24] if str(v or "").strip()}, ensure_ascii=False)
+    if "tags" in d:
+        vals["tags"] = json.dumps(clean_tags(d["tags"]), ensure_ascii=False)
+    return vals
+
+
+def set_style_folders(sid, ids):
+    ok = {f["id"] for f in db.q("SELECT id FROM folders WHERE scope='style'")}
+    db.x("DELETE FROM style_folders WHERE style_id=?", (sid,))
+    db.many("INSERT OR IGNORE INTO style_folders(style_id, folder_id) VALUES (?,?)", [(sid, int(i)) for i in ids if str(i).isdigit() and int(i) in ok])
+
+
+def add_style_images(sid, imgs):
+    """견본 그림 넣기 (data URL + 그림에서 읽은 프롬프트 같은 메타). 한 번에 40장까지."""
+    n = db.q("SELECT COALESCE(MAX(sort), 0) AS n FROM style_images WHERE style_id=?", (sid,))[0]["n"]
+    for x in (imgs if isinstance(imgs, list) else [])[:40]:
+        if not isinstance(x, dict):
+            continue
+        name = save_data_url(x.get("data"))
+        n += 1
+        meta = json.dumps(x.get("meta") if isinstance(x.get("meta"), dict) else {}, ensure_ascii=False)[:30000]
+        db.x("INSERT INTO style_images(style_id, image, sort, meta, created) VALUES (?,?,?,?,?)", (sid, name, n, meta, now()))
+    db.x("UPDATE styles SET updated=? WHERE id=?", (now(), sid))
+
+
+def new_style(d):
+    vals = style_vals(d)
+    vals.setdefault("name", "이름 없는 그림체")
+    vals["created"] = vals["updated"] = vals["opened"] = now()
+    sid, _ = db.x(f"INSERT INTO styles({', '.join(vals)}) VALUES ({','.join('?' * len(vals))})", tuple(vals.values()))
+    set_style_folders(sid, d.get("folders") or [])
+    add_style_images(sid, d.get("images"))
+    return sid
+
+
+STYLE_MIME = {"png": "image/png", "jpg": "image/jpeg", "webp": "image/webp"}
+
+
+def style_export(ids):
+    """나눠 줄 그림체 파일 — 그림은 data URL로 넣음 (폴더·이은 봇은 빼고)."""
+    out = []
+    for i in ids:
+        s = style_detail(i)
+        if not s:
+            continue
+        imgs = []
+        for g in s["images"]:
+            ext = g["image"].rsplit(".", 1)[1]
+            f = MEDIA / g["image"]
+            if ext in STYLE_MIME and f.is_file():
+                imgs.append({"data": f"data:{STYLE_MIME[ext]};base64,{base64.b64encode(f.read_bytes()).decode()}", "meta": g["meta"]})
+        st = db.q("SELECT name FROM stypes WHERE key=?", (s["stype"],))
+        out.append({k: s[k] for k in ("name", "creator", "source", "prompt", "negative", "settings", "memo", "tags")} | {"stype_name": st[0]["name"] if st else "", "images": imgs})
+    return {"format": "botkive-style", "version": 1, "styles": out}
+
+
+def style_import(d):
+    if not isinstance(d, dict) or d.get("format") != "botkive-style" or not isinstance(d.get("styles"), list):
+        raise ValueError("봇카이브 그림체 파일이 아니에요")
+    ids = []
+    for s in d["styles"][:200]:
+        if not isinstance(s, dict):
+            continue
+        name = str(s.get("stype_name") or "").strip()[:12]
+        hit = db.q("SELECT key FROM stypes WHERE name=?", (name,)) if name else []
+        if not hit and name and db.q("SELECT COUNT(*) AS n FROM stypes")[0]["n"] < LABELS["stypes"][1]:  # 없는 분류는 더해 줌
+            key = "g" + secrets.token_hex(4)
+            db.x("INSERT INTO stypes(key, name, color, sort) VALUES (?,?,'#C7C5CC',(SELECT COALESCE(MAX(sort),0)+1 FROM stypes))", (key, name))
+            hit = [{"key": key}]
+        ids.append(new_style({**{k: s[k] for k in STYLE_FIELDS if k in s}, "settings": s.get("settings"), "tags": s.get("tags") or [],
+                              "stype": hit[0]["key"] if hit else "etc", "images": s.get("images")}))
+    return ids
+
+
 def clean_tags(v):
     """앞 # 떼고, 30자까지, 대소문자 무시 중복 빼고 30개까지."""
     out, seen = [], set()
@@ -743,6 +880,8 @@ def bot_detail(id):
         v["intros"] = [i for i in ins if i["version_id"] == v["id"]]
     b["chats"] = chat_list(id)
     b["tags"] = tags_of(b.get("tags"))
+    b["styles"] = db.q("""SELECT s.id, s.name, s.stype, bs.role, (SELECT image FROM style_images i WHERE i.style_id=s.id ORDER BY sort, id LIMIT 1) AS cover
+                          FROM bot_styles bs JOIN styles s ON s.id=bs.style_id WHERE bs.bot_id=? ORDER BY bs.role='official' DESC, s.name""", (id,))
     try:
         b["rx"] = json.loads(b.get("rx") or "{}")
     except ValueError:
@@ -1081,13 +1220,15 @@ def recent_marks(limit=12):
 
 def state():
     return {
-        "folders": db.q("""SELECT f.*, (SELECT COUNT(*) FROM bot_folders bf WHERE bf.folder_id=f.id) AS count
+        "folders": db.q("""SELECT f.*, (SELECT COUNT(*) FROM bot_folders bf WHERE bf.folder_id=f.id) + (SELECT COUNT(*) FROM style_folders sf WHERE sf.folder_id=f.id) AS count
                            FROM folders f ORDER BY sort, id"""),
         "statuses": db.q("""SELECT s.*, (SELECT COUNT(*) FROM bots b WHERE b.status=s.key AND COALESCE(b.itype, '')='') AS count
                             FROM statuses s ORDER BY sort, key"""),
         "itypes": db.q("""SELECT t.*, (SELECT COUNT(*) FROM bots b WHERE b.itype=t.key) AS count
                           FROM itypes t ORDER BY sort, key"""),
         "items": db.q("SELECT COUNT(*) AS n FROM bots WHERE COALESCE(itype, '') != ''")[0]["n"],
+        "stypes": db.q("""SELECT t.*, (SELECT COUNT(*) FROM styles s WHERE s.stype=t.key) AS count FROM stypes t ORDER BY sort, key"""),
+        "styles": db.q("SELECT COUNT(*) AS n FROM styles")[0]["n"],
         "shelves": db.q("""SELECT s.*, (SELECT COUNT(*) FROM files f WHERE f.shelf_id=s.id AND f.bot_id IS NULL) AS count
                            FROM shelves s ORDER BY sort, id"""),
         "bots": db.q("SELECT COUNT(*) AS n FROM bots WHERE COALESCE(itype, '') = ''")[0]["n"],
@@ -1415,6 +1556,21 @@ class Handler(BaseHTTPRequestHandler):
             if p == ["bots"]:
                 rows = bot_summaries(int(params["folder"]) if params.get("folder", "").isdigit() else None, params.get("items") == "1")
                 return self.send(200, rows)
+            if p == ["styles"]:
+                return self.send(200, style_rows())
+            if p == ["styles", "export"]:
+                ids = [int(x) for x in params.get("ids", "").split(",") if x.isdigit()]
+                one = style_detail(ids[0]) if len(ids) == 1 else None
+                fname = f"{one['name'] if one else f'그림체 {len(ids)}개'}.botkive-style.json"
+                return self.send(200, json.dumps(style_export(ids), ensure_ascii=False).encode(), cache="no-store",
+                                 headers=[("Content-Disposition", f"attachment; filename=\"style.json\"; filename*=UTF-8''{quote(fname)}")])
+            if len(p) == 2 and p[0] == "styles" and p[1].isdigit():
+                s = style_detail(int(p[1]))
+                if not s:
+                    return self.send(404, {"error": "그림체가 없어요"})
+                if params.get("open"):
+                    db.x("UPDATE styles SET opened=? WHERE id=?", (now(), s["id"]))
+                return self.send(200, s)
             if len(p) == 2 and p[0] == "bots" and p[1].isdigit():
                 b = bot_detail(int(p[1]))
                 if not b:
@@ -1468,6 +1624,24 @@ class Handler(BaseHTTPRequestHandler):
                 return self.auth_post(p, d)
             if not self.gate():
                 return
+            if p == ["styles"]:
+                return self.send(200, style_detail(new_style(d)))
+            if p == ["styles", "import"]:
+                ids = style_import(d)
+                return self.send(200, {"ok": True, "ids": ids})
+            if p and len(p) == 3 and p[0] == "styles" and p[1].isdigit() and p[2] in ("images", "bots"):
+                sid = int(p[1])
+                if not db.q("SELECT 1 FROM styles WHERE id=?", (sid,)):
+                    return self.send(404, {"error": "그림체가 없어요"})
+                if p[2] == "images":
+                    add_style_images(sid, d.get("images"))
+                else:
+                    bid = d.get("bot_id")
+                    if not isinstance(bid, int) or not db.q("SELECT 1 FROM bots WHERE id=?", (bid,)):
+                        return self.send(404, {"error": "봇이 없어요"})
+                    db.x("INSERT INTO bot_styles(bot_id, style_id, role) VALUES (?,?,?) ON CONFLICT(bot_id, style_id) DO UPDATE SET role=excluded.role",
+                         (bid, sid, "official" if d.get("role") == "official" else "mine"))
+                return self.send(200, style_detail(sid))
             if p == ["bots"]:
                 vals = clean(d, BOT_FIELDS)
                 vals.setdefault("name", "이름 없는 봇")
@@ -1558,7 +1732,7 @@ class Handler(BaseHTTPRequestHandler):
                     return self.send(400, {"error": "폴더 이름을 적어 주세요"})
                 color = d.get("color") if d.get("color") in COLORS else "#C7C5CC"
                 fid, _ = db.x("INSERT INTO folders(name, color, sort, created, scope) VALUES (?,?,(SELECT COALESCE(MAX(sort),0)+1 FROM folders),?,?)",
-                              (name, color, now(), "item" if d.get("scope") == "item" else "bot"))
+                              (name, color, now(), d.get("scope") if d.get("scope") in ("item", "style") else "bot"))
                 return self.send(200, {"ok": True, "id": fid, "state": state()})
             if p and len(p) == 1 and p[0] in LABELS:
                 t, (what, most, pre) = p[0], LABELS[p[0]]
@@ -1679,6 +1853,24 @@ class Handler(BaseHTTPRequestHandler):
                 if "title" in d:
                     db.x("UPDATE intros SET title=? WHERE id=?", (str(d["title"] or "").strip()[:300], i["id"]))
                 return self.send(200, {"ok": True, "bot": bot_detail(i["bot_id"])})
+            if p and len(p) == 2 and p[0] == "styles" and p[1].isdigit():
+                sid = int(p[1])
+                if not db.q("SELECT 1 FROM styles WHERE id=?", (sid,)):
+                    return self.send(404, {"error": "그림체가 없어요"})
+                vals = style_vals(d)
+                if vals:
+                    vals["updated"] = now()
+                    db.x(f"UPDATE styles SET {', '.join(k + '=?' for k in vals)} WHERE id=?", (*vals.values(), sid))
+                if isinstance(d.get("folders"), list):
+                    set_style_folders(sid, d["folders"])
+                return self.send(200, style_detail(sid))
+            if p and len(p) == 2 and p[0] == "style_images" and p[1].isdigit():
+                g = db.q("SELECT style_id FROM style_images WHERE id=?", (int(p[1]),))
+                if not g:
+                    return self.send(404, {"error": "그림이 없어요"})
+                if d.get("front"):  # 대표 그림 = 맨 앞
+                    db.x("UPDATE style_images SET sort=(SELECT MIN(sort) FROM style_images WHERE style_id=?)-1 WHERE id=?", (g[0]["style_id"], int(p[1])))
+                return self.send(200, style_detail(g[0]["style_id"]))
             if p and len(p) == 2 and p[0] in LABELS:
                 vals = {}
                 if str(d.get("name") or "").strip():
@@ -1841,12 +2033,26 @@ class Handler(BaseHTTPRequestHandler):
                     return self.send(404, {"error": f"없는 {what}예요"})
                 if st[0]["builtin"]:
                     return self.send(400, {"error": f"기본 {what}는 지울 수 없어요"})
-                if p[0] == "statuses":
-                    db.x("UPDATE bots SET status='later' WHERE status=?", (p[1],))
-                else:
-                    db.x("UPDATE bots SET itype='etc' WHERE itype=?", (p[1],))
+                t, col, to = LABEL_MOVE[p[0]]
+                db.x(f"UPDATE {t} SET {col}=? WHERE {col}=?", (to, p[1]))
                 db.x(f"DELETE FROM {p[0]} WHERE key=?", (p[1],))
                 return self.send(200, {"ok": True, "state": state()})
+            if p and len(p) == 4 and p[0] == "styles" and p[1].isdigit() and p[2] == "bots" and p[3].isdigit():
+                db.x("DELETE FROM bot_styles WHERE style_id=? AND bot_id=?", (int(p[1]), int(p[3])))
+                return self.send(200, style_detail(int(p[1])) or {"ok": True})
+            if p and len(p) == 2 and p[0] in ("styles", "style_images") and p[1].isdigit():
+                id = int(p[1])
+                if p[0] == "styles":
+                    imgs = [g["image"] for g in db.q("SELECT image FROM style_images WHERE style_id=?", (id,))]
+                    db.x("DELETE FROM styles WHERE id=?", (id,))
+                    drop_media(*imgs)
+                    return self.send(200, {"ok": True})
+                g = db.q("SELECT style_id, image FROM style_images WHERE id=?", (id,))
+                if not g:
+                    return self.send(404, {"error": "그림이 없어요"})
+                db.x("DELETE FROM style_images WHERE id=?", (id,))
+                drop_media(g[0]["image"])
+                return self.send(200, style_detail(g[0]["style_id"]))
             if not p or len(p) != 2 or not p[1].isdigit() or p[0] not in ("bots", "folders", "shelves", "links", "files", "chats", "versions", "intros"):
                 return self.send(404, {"error": "없음"})
             id = int(p[1])
