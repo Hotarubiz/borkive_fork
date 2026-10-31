@@ -502,6 +502,23 @@ img.emo{display:block;max-width:min(300px,100%);max-height:380px;width:auto;marg
 .simb{display:flex;gap:4px;opacity:0;transition:opacity .15s}
 .sim:hover .simb,.sim:focus-within .simb{opacity:1}
 @media (hover:none){.simb{opacity:1}}
+.sfchars{display:flex;flex-direction:column;gap:10px}
+.sfchars:empty{display:none}
+.sfch{display:flex;flex-direction:column;gap:6px;padding:10px 12px;border-radius:12px;background:var(--sunk2);border:1px solid var(--line)}
+.sfchh{display:flex;align-items:center;justify-content:space-between;font-size:13px}
+.sfchn{display:flex;align-items:center;gap:10px}
+.sfchn .inp{flex:1;min-width:0}
+.sview{position:fixed;inset:0;z-index:55;display:flex;background:rgba(6,6,8,.94)}
+.svimg{flex:1;min-width:0;position:relative;display:grid;place-items:center;padding:20px}
+.svimg img{max-width:100%;max-height:calc(100vh - 40px);object-fit:contain;border-radius:10px}
+.svnav{position:absolute;top:50%;transform:translateY(-50%);width:44px;height:44px;border-radius:50%;border:0;background:rgba(255,255,255,.14);color:#fff;display:grid;place-items:center;cursor:pointer}
+.svnav:hover{background:rgba(255,255,255,.24)}
+.svnav.prev{left:16px}.svnav.next{right:16px}.svnav.next svg{transform:rotate(180deg)}
+.svside{width:400px;flex:none;display:flex;flex-direction:column;gap:14px;padding:18px 20px;background:var(--card);border-left:1px solid var(--line);overflow:auto;color:var(--ink)}
+.svtop{display:flex;align-items:center;gap:8px}
+.svtop .ib{margin-left:auto}
+.svh{display:flex;align-items:center;justify-content:space-between;font-size:13px;font-weight:700;color:var(--ink2);margin-bottom:6px}
+@media (max-width:760px){.sview{flex-direction:column}.svimg{flex:none;height:50vh;padding:10px}.svimg img{max-height:100%}.svside{width:auto;flex:1;border-left:0;border-top:1px solid var(--line)}}
 .sfta{min-height:96px;font:13px/1.6 Consolas,'D2Coding',monospace}
 .sfset{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:10px}
 .sbl{display:flex;flex-direction:column;gap:6px}
@@ -3105,7 +3122,7 @@ async function genMeta(file) {
     const v4 = c.v4_prompt && c.v4_prompt.caption, n4 = c.v4_negative_prompt && c.v4_negative_prompt.caption;
     const str = v => v == null || v === '' ? '' : String(v);
     return {gen: 'NAI', prompt: (v4 && v4.base_caption) || c.prompt || t.Description || '', negative: (n4 && n4.base_caption) || c.uc || '',
-      chars: v4 && Array.isArray(v4.char_captions) ? v4.char_captions.map(x => x.char_caption).filter(Boolean) : [],
+      chars: v4 && Array.isArray(v4.char_captions) ? v4.char_captions.map((x, i) => ({prompt: x.char_caption || '', negative: (n4 && n4.char_captions && n4.char_captions[i] && n4.char_captions[i].char_caption) || ''})).filter(c => c.prompt || c.negative) : [],
       settings: {model: str(t.Source), sampler: str(c.sampler), steps: str(c.steps), scale: str(c.scale), cfg_rescale: str(c.cfg_rescale || ''),
         noise_schedule: str(c.noise_schedule), size: c.width && c.height ? `${c.width}×${c.height}` : ''}};
   }
@@ -3120,6 +3137,7 @@ async function genMeta(file) {
 const imgData = f => /^image\/(png|jpeg|webp)$/.test(f.type) && f.size <= 12e6
   ? new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = () => rej(new Error('그림을 못 읽었어요')); r.readAsDataURL(f); })
   : shrink(f, 2000, .9);
+const charOf = c => typeof c === 'string' ? {prompt: c, negative: ''} : {prompt: c.prompt || '', negative: c.negative || ''};
 const styleCover = (x, size = 44) => `<div class="cv" style="background:${tint(x.id || 0)}">${x.cover ? `<img src="/m/${h(x.cover)}" alt="" loading="lazy">` : `<span class="ph pi">${ic('brush', size, 1.4)}</span>`}`;
 // 고르기 창 (봇 ↔ 그림체 잇기 공용): 찾기 + 역할(공식·어울림)
 function pickDialog({title, sub, items, empty, onPick}) {
@@ -3220,6 +3238,8 @@ function styleForm(x) {
       <label class="field" style="flex:1">만든 사람<input class="inp" id="sfWho" maxlength="200" value="${h(x.creator || '')}" placeholder="나"></label></div>
     <div class="field">분류<div class="seg" id="sfType">${Object.entries(STYPE).map(([k, v]) => `<button type="button" class="pill" data-t="${k}" aria-pressed="${(x.stype || 'etc') === k}">${h(v)}</button>`).join('')}</div></div>
     <label class="field">프롬프트 <span class="meta">작가·스타일 태그만 남기면 복사해 쓰기 좋아요</span><textarea class="inp sfta" id="sfPrompt" placeholder="예: artist:xxx, watercolor, soft lighting">${h(x.prompt || '')}</textarea></label>
+    <div class="field">캐릭터 <span class="meta">NAI 캐릭터 칸 · 6명까지</span><div class="sfchars" id="sfChars"></div>
+      <button type="button" class="btn sm ghost" id="sfCharAdd" style="align-self:flex-start">${ic('plus', 15)}캐릭터 더하기</button></div>
     <label class="field">네거티브<textarea class="inp sfta" id="sfNeg" style="min-height:64px">${h(x.negative || '')}</textarea></label>
     <div class="sfset">${['model', 'sampler', 'steps', 'scale'].map(k => `<label class="field">${SETL[k]}<input class="inp" data-set="${k}" value="${h(st[k] || '')}"></label>`).join('')}</div>
     <details${Object.keys(st).some(k => !['model', 'sampler', 'steps', 'scale'].includes(k)) || x.source || x.memo ? ' open' : ''}><summary class="meta" style="cursor:pointer">더 적기 (설정 · 출처 · 메모)</summary>
@@ -3231,16 +3251,32 @@ function styleForm(x) {
         <label class="field">메모<textarea class="inp sfta" id="sfMemo" style="min-height:64px">${h(x.memo || '')}</textarea></label>
       </div></details>`;
 }
+function charsUI(m, chars) {
+  const el = $('#sfChars', m);
+  const draw = list => {
+    el.innerHTML = list.map((c, i) => `<div class="sfch"><div class="sfchh"><b>캐릭터 ${i + 1}</b><button type="button" class="ib" data-chrm="${i}" aria-label="캐릭터 ${i + 1} 빼기">${ic('x', 14)}</button></div>
+      <textarea class="inp sfta" data-chp placeholder="예: girl, red hair, school uniform" style="min-height:64px">${h(c.prompt)}</textarea>
+      <label class="sfchn"><span class="meta">네거티브</span><input class="inp" data-chn value="${h(c.negative)}" placeholder="이 캐릭터만 빼고 싶은 것 (없으면 비워 두기)"></label></div>`).join('');
+    $$('[data-chrm]', el).forEach(b => b.onclick = () => { const l = read(); l.splice(+b.dataset.chrm, 1); draw(l); });
+    $('#sfCharAdd', m).hidden = list.length >= 6;
+  };
+  const read = () => $$('.sfch', el).map(r => ({prompt: $('[data-chp]', r).value, negative: $('[data-chn]', r).value}));
+  $('#sfCharAdd', m).onclick = () => { draw([...read(), {prompt: '', negative: ''}]); const t = $$('[data-chp]', el).pop(); t && t.focus(); };
+  m.chars = {read, draw};
+  draw((chars || []).map(charOf));
+}
 function readStyleForm(m, stype) {
   const settings = {};
   $$('[data-set]', m).forEach(i => { if (i.value.trim()) settings[i.dataset.set] = i.value.trim(); });
   return {name: $('#sfName', m).value.trim(), creator: $('#sfWho', m).value.trim(), stype, prompt: $('#sfPrompt', m).value.trim(), negative: $('#sfNeg', m).value.trim(), settings,
+    chars: m.chars.read().map(c => ({prompt: c.prompt.trim(), negative: c.negative.trim()})).filter(c => c.prompt || c.negative),
     source: $('#sfSrc', m).value.trim(), memo: $('#sfMemo', m).value.trim(), tags: $('#sfTags', m).value.split(',').map(t => t.trim()).filter(Boolean)};
 }
 function fillFromMeta(m, meta) {  // 비어 있는 칸만 채움
   if (!meta) return;
   if (!$('#sfPrompt', m).value.trim()) $('#sfPrompt', m).value = meta.prompt || '';
   if (!$('#sfNeg', m).value.trim()) $('#sfNeg', m).value = meta.negative || '';
+  if (meta.chars && meta.chars.length && !m.chars.read().some(c => c.prompt.trim() || c.negative.trim())) m.chars.draw(meta.chars.map(charOf).slice(0, 6));
   for (const [k, v] of Object.entries(meta.settings || {})) { const i = $(`[data-set="${k}"]`, m); if (i && !i.value.trim() && v) i.value = v; }
   if (Object.entries(meta.settings || {}).some(([k, v]) => v && !['model', 'sampler', 'steps', 'scale'].includes(k))) $('details', m).open = true;
 }
@@ -3275,6 +3311,7 @@ async function addStyle(preType) {
   dropZone(dz, add);
   $$('#sfType .pill', m).forEach(b => b.onclick = () => { stype = b.dataset.t; $$('#sfType .pill', m).forEach(x => x.setAttribute('aria-pressed', x === b)); });
   folderTiles($('#sfFolders', m), chosen, 'style');
+  charsUI(m, []);
   $('#sfOk', m).onclick = async () => {
     const v = readStyleForm(m, stype), btn = $('#sfOk', m);
     if (!v.name) return toast('이름을 적어 주세요', true);
@@ -3319,6 +3356,8 @@ function drawStyle() {
     <div class="cols"><div style="min-width:0;display:flex;flex-direction:column;gap:18px">
       <div class="box"><h3>프롬프트${x.prompt ? `<button class="ib" data-cp="prompt" aria-label="프롬프트 복사" title="복사">${ic('copy', 16)}</button>` : ''}</h3>
         ${x.prompt ? `<pre class="sprm">${h(x.prompt)}</pre>` : '<p class="hint">아직 프롬프트가 없어요. 고치기에서 넣어 주세요.</p>'}
+        ${(x.chars || []).map(charOf).map((c, i) => `${c.prompt ? `<h3 style="margin-top:18px">캐릭터 ${i + 1}<button class="ib" data-cpc="${i}" aria-label="캐릭터 ${i + 1} 복사" title="복사">${ic('copy', 16)}</button></h3><pre class="sprm">${h(c.prompt)}</pre>` : ''}
+          ${c.negative ? `<h3 style="margin-top:${c.prompt ? 10 : 18}px;font-weight:600">캐릭터 ${i + 1} 네거티브<button class="ib" data-cpn="${i}" aria-label="캐릭터 ${i + 1} 네거티브 복사" title="복사">${ic('copy', 16)}</button></h3><pre class="sprm">${h(c.negative)}</pre>` : ''}`).join('')}
         ${x.negative ? `<h3 style="margin-top:18px">네거티브<button class="ib" data-cp="negative" aria-label="네거티브 복사" title="복사">${ic('copy', 16)}</button></h3><pre class="sprm">${h(x.negative)}</pre>` : ''}
         ${set.length ? `<div class="kv sset">${set.map(([k, v]) => `<div><b>${h(v)}</b><span>${h(SETL[k] || k)}</span></div>`).join('')}</div>` : ''}</div>
       <div class="box"><h3>견본 그림 <span class="meta" style="font-weight:500">${x.images.length}</span><button class="ib" id="syImg" aria-label="그림 더하기" title="그림 더하기">${ic('plus', 16)}</button></h3>
@@ -3338,6 +3377,8 @@ function drawStyle() {
   $('#syBack').onclick = () => navStack.length > 1 ? history.back() : (location.hash = '#/styles');
   $('#syCopy').onclick = () => copyText(x.prompt, '프롬프트를 복사했어요');
   $$('[data-cp]').forEach(b => b.onclick = () => copyText(x[b.dataset.cp], b.dataset.cp === 'prompt' ? '프롬프트를 복사했어요' : '네거티브를 복사했어요'));
+  $$('[data-cpc]').forEach(b => b.onclick = () => copyText(charOf(x.chars[+b.dataset.cpc]).prompt, `캐릭터 ${+b.dataset.cpc + 1} 프롬프트를 복사했어요`));
+  $$('[data-cpn]').forEach(b => b.onclick = () => copyText(charOf(x.chars[+b.dataset.cpn]).negative, `캐릭터 ${+b.dataset.cpn + 1} 네거티브를 복사했어요`));
   $$('#syType .pill').forEach(b => b.onclick = async () => { try { await reload(await api('PUT', `/api/styles/${x.id}`, {stype: b.dataset.t})); loadState(); } catch (e) { fail(e); } });
   $('#syTyEdit').onclick = () => labelDialog('stypes', () => viewStyle(x.id));
   $('#syFolders').onclick = () => {
@@ -3352,6 +3393,7 @@ function drawStyle() {
     const m = modal(`<header><h2>그림체 고치기</h2>${xBtn}</header><div class="bd">${styleForm(x)}</div>
       <footer><span class="note"></span><button class="btn" data-close>취소</button><button class="btn pri" data-ok>저장</button></footer>`);
     $$('#sfType .pill', m).forEach(b => b.onclick = () => { stype = b.dataset.t; $$('#sfType .pill', m).forEach(y => y.setAttribute('aria-pressed', y === b)); });
+    charsUI(m, x.chars);
     $('[data-ok]', m).onclick = async () => {
       const v = readStyleForm(m, stype);
       if (!v.name) return toast('이름을 적어 주세요', true);
@@ -3370,7 +3412,7 @@ function drawStyle() {
       await reload(await api('POST', `/api/styles/${x.id}/images`, {images})); toast(`${fs.length}장 더했어요`);
     } catch (e) { fail(e); }
   };
-  $$('[data-lb]').forEach(i => i.onclick = () => lightbox('/m/' + i.dataset.lb));
+  $$('[data-lb]').forEach((im, i) => im.onclick = () => styleViewer(i));
   $$('.sim[data-g]').forEach(el => {
     const g = x.images.find(y => y.id === +el.dataset.g);
     const f = $('[data-front]', el), gp = $('[data-gp]', el);
@@ -3389,6 +3431,46 @@ function drawStyle() {
       onPick: async (bid, role) => reload(await api('POST', `/api/styles/${x.id}/bots`, {bot_id: bid, role}))});
   };
   $$('[data-unb]').forEach(b => b.onclick = async () => { try { await reload(await api('DELETE', `/api/styles/${x.id}/bots/${b.dataset.unb}`)); } catch (e) { fail(e); } });
+}
+
+// 견본 그림 크게 보기 + 옆에 그 그림의 생성 정보 (←/→로 넘기기, Esc 닫기)
+function styleViewer(start) {
+  let i = start;
+  const el = document.createElement('div');
+  el.className = 'sview'; el.setAttribute('role', 'dialog'); el.setAttribute('aria-modal', 'true');
+  document.body.append(el);
+  const key = e => { if (e.key === 'Escape') close(); else if (e.key === 'ArrowRight') go(1); else if (e.key === 'ArrowLeft') go(-1); };
+  const close = () => { el.remove(); document.removeEventListener('keydown', key); };
+  const go = d => { const n = SY.images.length; if (n > 1) { i = (i + d + n) % n; draw(); } };
+  document.addEventListener('keydown', key);
+  const draw = () => {
+    const imgs = SY.images, g = imgs[i], mt = g.meta || {}, texts = [];
+    const set = Object.entries(mt.settings || {}).filter(([, v]) => v), chars = (mt.chars || []).map(charOf).filter(c => c.prompt || c.negative);
+    const sec = (title, text) => { texts.push(text); return `<div><div class="svh">${title}<button class="ib" data-copy="${texts.length - 1}" aria-label="${title} 복사" title="복사">${ic('copy', 15)}</button></div><pre class="sprm">${h(text)}</pre></div>`; };
+    const body = [mt.prompt ? sec('프롬프트', mt.prompt) : '',
+      ...chars.map((c, n) => (c.prompt ? sec(`캐릭터 ${n + 1}`, c.prompt) : '') + (c.negative ? sec(`캐릭터 ${n + 1} 네거티브`, c.negative) : '')),
+      mt.negative ? sec('네거티브', mt.negative) : '',
+      set.length ? `<div class="kv sset" style="margin:0">${set.map(([k, v]) => `<div><b>${h(v)}</b><span>${h(SETL[k] || k)}</span></div>`).join('')}</div>` : ''].join('');
+    el.innerHTML = `<div class="svimg"><img src="/m/${h(g.image)}" alt="">
+        ${imgs.length > 1 ? `<button class="svnav prev" data-go="-1" aria-label="앞 그림">${ic('back', 22)}</button><button class="svnav next" data-go="1" aria-label="다음 그림">${ic('back', 22)}</button>` : ''}</div>
+      <aside class="svside">
+        <div class="svtop"><b>견본 그림 ${i + 1} / ${imgs.length}</b>${mt.gen ? `<span class="srole">${h(mt.gen)}</span>` : ''}<button class="ib" data-x aria-label="닫기">${ic('x', 20)}</button></div>
+        ${body || '<p class="hint" style="margin:0">이 그림에는 생성 정보가 없어요. NAI·웹UI에서 바로 저장한 PNG라야 읽을 수 있어요.</p>'}
+        <div class="row" style="margin-top:auto;padding-top:6px">
+          <a class="btn sm ghost" href="/m/${h(g.image)}" download>${ic('dl', 15)}원본 받기</a>
+          ${i ? `<button class="btn sm ghost" data-front>${ic('star', 15)}대표 그림으로</button>` : '<span class="meta">대표 그림이에요</span>'}
+        </div>
+      </aside>`;
+    $('[data-x]', el).onclick = close;
+    $('.svimg', el).onclick = e => { if (e.target === e.currentTarget) close(); };  // 그림 밖 빈 곳을 누르면 닫기
+    $$('[data-go]', el).forEach(b => b.onclick = () => go(+b.dataset.go));
+    $$('[data-copy]', el).forEach(b => b.onclick = () => copyText(texts[+b.dataset.copy]));
+    const f = $('[data-front]', el);
+    if (f) f.onclick = async () => {
+      try { SY = await api('PUT', `/api/style_images/${g.id}`, {front: true}); i = 0; drawStyle(); draw(); toast('대표 그림으로 바꿨어요'); } catch (e) { fail(e); }
+    };
+  };
+  draw();
 }
 
 // ---- 파일 모아 보기 (봇에 딸린 파일 · 예전 칸 파일) ----

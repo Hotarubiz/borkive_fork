@@ -265,6 +265,8 @@ class DB:
         if not self.c.execute("SELECT 1 FROM itypes LIMIT 1").fetchone():
             for i, (k, n, col) in enumerate(DEFAULT_ITYPES):
                 self.c.execute("INSERT INTO itypes(key, name, color, sort, builtin) VALUES (?,?,?,?,1)", (k, n, col, i))
+        if "chars" not in [r["name"] for r in self.c.execute("PRAGMA table_info(styles)")]:  # 그림체 캐릭터 칸 (NAI v4) [{prompt, negative}]
+            self.c.execute("ALTER TABLE styles ADD COLUMN chars TEXT DEFAULT '[]'")
         if "ep" not in [r["name"] for r in self.c.execute("PRAGMA table_info(chats)")]:  # 시리즈 화 번호 직접 지정 (NULL = 제목에서 읽음)
             self.c.execute("ALTER TABLE chats ADD COLUMN ep INTEGER")
         self.c.commit()
@@ -741,6 +743,10 @@ def style_detail(id):
         s["settings"] = json.loads(s["settings"] or "{}")
     except ValueError:
         s["settings"] = {}
+    try:
+        s["chars"] = json.loads(s.get("chars") or "[]")
+    except ValueError:
+        s["chars"] = []
     s["images"] = db.q("SELECT id, image, meta FROM style_images WHERE style_id=? ORDER BY sort, id", (id,))
     for i in s["images"]:
         try:
@@ -763,6 +769,9 @@ def style_vals(d):
         vals["settings"] = json.dumps({str(k)[:40]: str(v)[:300] for k, v in list(d["settings"].items())[:24] if str(v or "").strip()}, ensure_ascii=False)
     if "tags" in d:
         vals["tags"] = json.dumps(clean_tags(d["tags"]), ensure_ascii=False)
+    if isinstance(d.get("chars"), list):  # 캐릭터 칸: NAI는 6명까지
+        cs = [{"prompt": str(c.get("prompt") or "").strip()[:5000], "negative": str(c.get("negative") or "").strip()[:2000]} for c in d["chars"] if isinstance(c, dict)]
+        vals["chars"] = json.dumps([c for c in cs if c["prompt"] or c["negative"]][:6], ensure_ascii=False)
     return vals
 
 
@@ -812,7 +821,7 @@ def style_export(ids):
             if ext in STYLE_MIME and f.is_file():
                 imgs.append({"data": f"data:{STYLE_MIME[ext]};base64,{base64.b64encode(f.read_bytes()).decode()}", "meta": g["meta"]})
         st = db.q("SELECT name FROM stypes WHERE key=?", (s["stype"],))
-        out.append({k: s[k] for k in ("name", "creator", "source", "prompt", "negative", "settings", "memo", "tags")} | {"stype_name": st[0]["name"] if st else "", "images": imgs})
+        out.append({k: s[k] for k in ("name", "creator", "source", "prompt", "negative", "chars", "settings", "memo", "tags")} | {"stype_name": st[0]["name"] if st else "", "images": imgs})
     return {"format": "botkive-style", "version": 1, "styles": out}
 
 
@@ -829,7 +838,7 @@ def style_import(d):
             key = "g" + secrets.token_hex(4)
             db.x("INSERT INTO stypes(key, name, color, sort) VALUES (?,?,'#C7C5CC',(SELECT COALESCE(MAX(sort),0)+1 FROM stypes))", (key, name))
             hit = [{"key": key}]
-        ids.append(new_style({**{k: s[k] for k in STYLE_FIELDS if k in s}, "settings": s.get("settings"), "tags": s.get("tags") or [],
+        ids.append(new_style({**{k: s[k] for k in STYLE_FIELDS if k in s}, "settings": s.get("settings"), "chars": s.get("chars") or [], "tags": s.get("tags") or [],
                               "stype": hit[0]["key"] if hit else "etc", "images": s.get("images")}))
     return ids
 
