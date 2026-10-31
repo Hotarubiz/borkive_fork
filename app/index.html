@@ -488,6 +488,9 @@ img.emo{display:block;max-width:min(300px,100%);max-height:380px;width:auto;marg
 .addtop .cv{width:150px;flex:none}
 .colors{display:flex;gap:8px;flex-wrap:wrap}
 .srows{display:flex;flex-direction:column;gap:8px}
+.login{position:fixed;inset:0;z-index:200;display:grid;place-items:center;padding:16px;background:var(--bg)}
+.lgbox{width:min(340px,100%);display:flex;flex-direction:column;gap:14px;padding:30px 26px;border-radius:20px;background:var(--card);border:1px solid var(--line)}
+.lgbox .inp{min-height:46px;font-size:16px}
 .ph.pi{display:grid;place-items:center;color:rgba(255,255,255,.72)}
 .ifp i{width:9px;height:9px;border-radius:3px;background:var(--fc)}
 .srow{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
@@ -720,6 +723,7 @@ const ICON = {
   puzzle: '<path d="M10 4a2 2 0 0 1 4 0v2h5v5h-2a2 2 0 0 0 0 4h2v5h-5v-2a2 2 0 0 0-4 0v2H5v-5h2a2 2 0 0 0 0-4H5V6h5z"/>',
   book: '<path d="M5 4h11a3 3 0 0 1 3 3v13H8a3 3 0 0 1-3-3zM5 17a3 3 0 0 1 3-3h11"/>',
   plug: '<path d="M9 3v5M15 3v5M6 8h12v3a6 6 0 0 1-12 0zM12 17v4"/>',
+  lock: '<rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>',
   palette: '<path d="M12 3a9 9 0 1 0 0 18c1.1 0 1.6-.8 1.6-1.6 0-.9-.6-1.3-.6-2.1 0-.9.7-1.5 1.6-1.5H17a4 4 0 0 0 4-4c0-4.9-4-8.8-9-8.8z"/><circle cx="7.5" cy="11" r="1.2"/><circle cx="10" cy="7" r="1.2"/><circle cx="14.5" cy="7" r="1.2"/>',
 };
 const ic = (n, s = 18, w = 2) => `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="${w}" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICON[n]}</svg>`;
@@ -731,6 +735,7 @@ async function api(method, path, body) {
   const r = await fetch(path, opt);
   let d = null;
   try { d = await r.json(); } catch (e) {}
+  if (r.status === 401 && d && d.login) { showLogin(); const e = new Error(d.error); e.login = true; throw e; }
   if (!r.ok) throw new Error(d && d.error || `서버 오류 (${r.status})`);
   return d;
 }
@@ -740,12 +745,12 @@ function upload(file, params, onProg) {
     x.open('PUT', '/api/upload?' + new URLSearchParams(params));
     x.setRequestHeader('X-BS', '1');
     x.upload.onprogress = e => e.lengthComputable && onProg && onProg(e.loaded / e.total);
-    x.onload = () => { let d = {}; try { d = JSON.parse(x.responseText); } catch (e) {} x.status < 300 ? res(d) : rej(new Error(d.error || `올리기 실패 (${x.status})`)); };
+    x.onload = () => { let d = {}; try { d = JSON.parse(x.responseText); } catch (e) {} if (x.status === 401 && d.login) showLogin(); x.status < 300 ? res(d) : rej(new Error(d.error || `올리기 실패 (${x.status})`)); };
     x.onerror = () => rej(new Error('올리는 중 연결이 끊겼어요'));
     x.send(file);
   });
 }
-async function loadState() { S.state = await api('GET', '/api/state'); syncStatus(); renderSide(); return S.state; }
+async function loadState() { [S.state, S.auth] = await Promise.all([api('GET', '/api/state'), api('GET', '/api/auth')]); syncStatus(); renderSide(); return S.state; }
 const folderById = id => (S.state.folders || []).find(f => f.id === id);
 
 // ---- 작은 도구 ----
@@ -849,6 +854,7 @@ function renderSide() {
     ${botFolders().map(f => `<a class="nav" href="#/f/${f.id}"${cur('/f/' + f.id)}><span class="dot" style="background:${f.color}"></span>${h(f.name)}<span class="n">${f.count}</span></a>`).join('')}
     <div class="grow"></div>
     <button class="nav" data-act="theme" style="border:0;background:none;width:100%;margin-top:12px">${ic('palette')}테마·글꼴<span class="n">${h(themeName())}</span></button>
+    <button class="nav" data-act="lock" style="border:0;background:none;width:100%">${ic('lock')}잠금<span class="n">${LOCK[(S.auth || {}).mode] || LOCK.off}</span></button>
     <button class="btn pri" data-act="add" style="margin:8px 4px 0">${ic('plus', 18)}봇 들이기</button>`;
 }
 document.addEventListener('click', e => {
@@ -858,6 +864,7 @@ document.addEventListener('click', e => {
   if (act === 'add') { document.body.classList.remove('drawer'); addBot(); }
   if (act === 'newfolder') folderDialog().then(f => f && loadState().then(() => document.body.classList.contains('entry') && route()));
   if (act === 'theme') { document.body.classList.remove('drawer'); themeDialog(); }
+  if (act === 'lock') { document.body.classList.remove('drawer'); lockDialog(); }
 });
 $('#menuBtn').onclick = () => document.body.classList.toggle('drawer');
 document.addEventListener('click', e => { if (document.body.classList.contains('drawer') && (e.target.closest('.side a') || !e.target.closest('.side,#menuBtn'))) document.body.classList.remove('drawer'); });
@@ -879,6 +886,73 @@ function applyTheme() {
   document.querySelector('meta[name=theme-color]').content = META_BG[r];
 }
 lightMQ.addEventListener('change', () => themePref() === 'auto' && applyTheme());
+// ---- 잠금: 끔 · 밖에서만 · 항상 (비밀번호 하나, 로그인은 이 브라우저에 30일) ----
+const LOCK = {off: '끔', remote: '밖에서만', always: '항상'};
+const LOCK_DS = {off: '이 앱을 여는 사람은 누구나 들어와요. 이 컴퓨터에서만 쓸 때 괜찮아요.',
+  remote: '이 컴퓨터에서 바로 열 땐 그냥 들어가고, 휴대폰·다른 기기(Tailscale·같은 와이파이)로 들어오면 비밀번호를 물어요.',
+  always: '어디서 열든 비밀번호를 물어요. 같이 쓰는 컴퓨터라면 이걸로 하세요.'};
+async function lockDialog() {
+  let a;
+  try { a = await api('GET', '/api/auth'); } catch (e) { return fail(e); }
+  let mode = a.mode;
+  const m = modal(`<header><h2>잠금</h2><span>${a.local ? '지금 이 컴퓨터에서 열었어요' : '지금 다른 기기에서 열었어요'}</span>${xBtn}</header>
+    <div class="bd">
+      <div class="field">언제 비밀번호를 물을까요<div class="seg" id="lkMode">${Object.entries(LOCK).map(([k, v]) => `<button type="button" class="pill" data-m="${k}" aria-pressed="${mode === k}">${v}</button>`).join('')}</div></div>
+      <p class="hint" id="lkDs" style="margin:0"></p>
+      ${a.has_password ? `<label class="field">지금 비밀번호<input class="inp" id="lkCur" type="password" autocomplete="current-password" placeholder="바꾸려면 지금 비밀번호가 필요해요"></label>
+        <details id="lkNewD"><summary class="meta" style="cursor:pointer">비밀번호 바꾸기</summary><div style="display:flex;flex-direction:column;gap:12px;margin-top:12px">` : '<div id="lkNewD" style="display:flex;flex-direction:column;gap:12px"><div style="display:flex;flex-direction:column;gap:12px">'}
+          <label class="field">${a.has_password ? '새 비밀번호' : '비밀번호 정하기'}<input class="inp" id="lkNew" type="password" autocomplete="new-password" placeholder="6자 이상"></label>
+          <label class="field">한 번 더<input class="inp" id="lkNew2" type="password" autocomplete="new-password"></label>
+        </div>${a.has_password ? '</details>' : '</div>'}
+      <p class="hint" style="margin:0">비밀번호를 잊으면 이 앱을 켠 컴퓨터에서 <code>.env</code>에 <code>BOTSHELF_RESET_AUTH=1</code>을 넣고 다시 켜면 잠금이 풀려요. 풀린 뒤에는 그 줄을 지우세요.</p>
+    </div>
+    <footer>${a.session ? `<button class="btn ghost" id="lkOut">로그아웃</button>` : ''}<span class="note"></span><button class="btn" data-close>취소</button><button class="btn pri" id="lkOk">저장</button></footer>`, 'narrow');
+  const draw = () => {
+    $$('#lkMode .pill', m).forEach(b => b.setAttribute('aria-pressed', b.dataset.m === mode));
+    $('#lkDs', m).textContent = LOCK_DS[mode];
+  };
+  $$('#lkMode .pill', m).forEach(b => b.onclick = () => { mode = b.dataset.m; draw(); });
+  draw();
+  if ($('#lkOut', m)) $('#lkOut', m).onclick = async () => { await api('POST', '/api/auth/logout', {}).catch(() => {}); location.reload(); };
+  $('#lkOk', m).onclick = async () => {
+    const cur = $('#lkCur', m) ? $('#lkCur', m).value : '', pw = $('#lkNew', m).value, pw2 = $('#lkNew2', m).value;
+    if (pw !== pw2) return toast('새 비밀번호 두 칸이 달라요', true);
+    if (pw && pw.length < 6) return toast('비밀번호는 6자 이상으로 해 주세요', true);
+    if (mode !== 'off' && !a.has_password && !pw) return toast('잠그려면 먼저 비밀번호를 정해 주세요', true);
+    if (a.has_password && !cur) return toast('지금 비밀번호를 넣어 주세요', true);
+    try {
+      await api('PUT', '/api/auth', {mode, current: cur, password: pw});
+      m.close(); await loadState(); toast(mode === 'off' ? '잠금을 껐어요' : `잠금: ${LOCK[mode]}`);
+    } catch (e) { fail(e); }
+  };
+}
+let loginShown = false;
+function showLogin() {
+  if (loginShown) return;
+  loginShown = true;
+  const el = document.createElement('div');
+  el.className = 'login';
+  el.innerHTML = `<form class="lgbox" autocomplete="on">
+    <span class="logo" style="padding:0;justify-content:center"><svg class="lgi" viewBox="0 0 64 64" aria-hidden="true"><rect class="l0" width="64" height="64" rx="16"/><rect class="ls" x="7" y="49" width="50" height="7" rx="3.5"/><rect class="l1" x="9" y="12" width="19" height="37" rx="5"/><circle class="le" cx="14.2" cy="23" r="3"/><circle class="le" cx="22.2" cy="23" r="3"/><rect class="l2" x="30" y="19" width="13" height="30" rx="4.5"/><rect class="l3" x="45" y="13" width="12" height="36" rx="4.5" transform="rotate(11 51 49)"/></svg><span class="lw"><b>봇</b>카이브<i>.</i></span></span>
+    <p class="hint" style="margin:0;text-align:center">잠겨 있어요. 비밀번호를 넣어 주세요.</p>
+    <input class="inp" id="lgPw" type="password" autocomplete="current-password" placeholder="비밀번호" aria-label="비밀번호" required>
+    <button class="btn pri" id="lgOk" type="submit">들어가기</button>
+    <p class="err-t" id="lgErr" hidden style="margin:0;text-align:center"></p>
+    <p class="meta" style="margin:0;text-align:center">이 브라우저에서 30일 동안 기억해요</p></form>`;
+  document.body.append(el);
+  $('#lgPw', el).focus();
+  $('form', el).onsubmit = async e => {
+    e.preventDefault();
+    const btn = $('#lgOk', el); btn.disabled = true;
+    try {
+      const r = await fetch('/api/auth/login', {method: 'POST', headers: {'X-BS': '1', 'Content-Type': 'application/json'}, body: JSON.stringify({password: $('#lgPw', el).value})});
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.error || '들어가지 못했어요');
+      location.reload();
+    } catch (er) { $('#lgErr', el).textContent = er.message; $('#lgErr', el).hidden = false; btn.disabled = false; $('#lgPw', el).select(); }
+  };
+}
+
 function themeDialog() {
   const sys = lightMQ.matches ? 'day' : 'night';
   const m = modal(`<header><h2>테마·글꼴</h2><span>서재의 색과 글씨를 골라요 — 이 기기에만 저장돼요</span>${xBtn}</header>
@@ -1277,6 +1351,7 @@ async function viewMain() {
       <a class="ib" href="#/chats" aria-label="채팅 로그" title="채팅 로그">${ic('chat', 20)}</a>
       <a class="ib" href="#/shelf" aria-label="자료함" title="자료함">${ic('box', 20)}</a>
       <button class="ib" data-act="theme" aria-label="테마" title="테마">${ic('palette', 20)}</button>
+      <button class="ib" data-act="lock" aria-label="잠금" title="잠금 (로그인)">${ic('lock', 20)}</button>
       <button class="btn sm pri" data-act="add" style="margin-left:6px">${ic('plus', 16)}<span class="t">봇 들이기</span></button></div>
     <div class="mhead"><div class="k">봇 ${bots.length} · 채팅 로그 ${st.chats} · 자료 ${st.items}</div>
       <h1>오늘은 누구를 꺼낼까요</h1>
@@ -3037,7 +3112,7 @@ async function route() {
   }
 }
 window.addEventListener('hashchange', route);
-loadState().then(route).catch(e => { $('#view').innerHTML = `<div class="wrap"><div class="empty"><h3>서버에 연결하지 못했어요</h3><p>${h(e.message)}</p></div></div>`; });
+loadState().then(route).catch(e => { if (e.login) return; $('#view').innerHTML = `<div class="wrap"><div class="empty"><h3>서버에 연결하지 못했어요</h3><p>${h(e.message)}</p></div></div>`; });
 </script>
 </body>
 </html>

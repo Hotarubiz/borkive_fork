@@ -2,7 +2,9 @@
 
 리스(RisuAI)에 다 넣어 두기 버거운 봇을 파일로 보관하고, 봇마다 소개글·채팅 로그·자료·링크·메모를 모아 둔다.
 혼자 쓰는 앱(계정·비밀번호 없음 — 내 컴퓨터나 Tailscale 같은 내 기기끼리만 열어 둘 것). 쓰기 요청은 X-BS: 1 헤더 필요(다른 사이트에서 몰래 보내는 요청 막기).
-환경 변수: DATA_DIR(기본 /data) · PORT(기본 8391) · HOST(기본 127.0.0.1 — 도커 안에서는 0.0.0.0).
+환경 변수: DATA_DIR(기본 /data) · PORT(기본 8391) · HOST(기본 127.0.0.1 — 도커 안에서는 0.0.0.0)
+          TRUST_GATEWAY=1(도커: 컨테이너 게이트웨이 = 이 컴퓨터로 봄) · RESET_AUTH=1(켤 때 잠금 풀기 — 비밀번호를 잊었을 때)
+잠금: 끔 · 밖에서만(이 컴퓨터에서 바로 열 땐 그냥, 프록시·다른 기기로 오면 비밀번호) · 항상. 로그인은 30일 쿠키.
 
 데이터: SQLite(/data/botshelf.db) + 그림(/data/media) + 올린 파일(/data/files). 6시간마다 DB 백업(30개).
 API (JSON):
@@ -30,12 +32,14 @@ API (JSON):
   PUT    /api/upload?bot=&version=|shelf=&kind=&name=    파일 원본(본문 그대로)
   GET    /api/files?all=1   PUT|DELETE /api/files/<id>
   GET    /api/chats?bot=    POST /api/chats    GET|PUT|DELETE /api/chats/<id>
+  GET    /api/auth   PUT /api/auth {mode, current, password}   POST /api/auth/login {password}   POST /api/auth/logout
   PUT    /api/marks                      {chat_id, idx, on, memo, image, drop_image} 장면 표시
   GET    /api/health
   GET    /m/<그림>   GET /f/<파일>?dl=<이름>
 """
 import base64
 import hashlib
+import hmac
 import ipaddress
 import json
 import os
@@ -52,6 +56,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from html import escape, unescape
 from html.parser import HTMLParser
+from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import quote, unquote, unquote_plus, urljoin, urlsplit
@@ -111,6 +116,8 @@ JSON_COLS = {"info"}
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS folders (id INTEGER PRIMARY KEY, name TEXT NOT NULL, color TEXT, sort INTEGER DEFAULT 0, created TEXT);
+CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT);
+CREATE TABLE IF NOT EXISTS sessions (token TEXT PRIMARY KEY, created TEXT, expires REAL);
 CREATE TABLE IF NOT EXISTS itypes (key TEXT PRIMARY KEY, name TEXT NOT NULL, color TEXT, sort INTEGER DEFAULT 0, builtin INTEGER DEFAULT 0);
 CREATE TABLE IF NOT EXISTS statuses (key TEXT PRIMARY KEY, name TEXT NOT NULL, color TEXT, sort INTEGER DEFAULT 0, builtin INTEGER DEFAULT 0);
 CREATE TABLE IF NOT EXISTS shelves (id INTEGER PRIMARY KEY, name TEXT NOT NULL, sort INTEGER DEFAULT 0, created TEXT);
@@ -146,6 +153,57 @@ CREATE INDEX IF NOT EXISTS intros_ver ON intros(version_id);
 """
 DEFAULT_FOLDERS = [("운영 봇", "#F2B655"), ("자작 봇", "#5EC2B7"), ("받은 봇", "#B9A6F5"), ("해 볼 것", "#8FB8E8")]
 DEFAULT_SHELVES = ["공용 모듈", "프롬프트 프리셋", "참고 그림"]
+
+
+# ---- 잠금(로그인) ----
+# 모드: off · remote(밖에서 올 때만) · always. 비밀번호는 scrypt로만 저장, 로그인 쿠키 토큰은 sha256으로만 저장
+AUTH_MODES = ("off", "remote", "always")
+SESSION_DAYS = 30
+COOKIE = "bk_session"
+FWD_HEADERS = ("X-Forwarded-For", "Forwarded", "X-Real-IP", "Tailscale-User-Login", "CF-Connecting-IP")  # 하나라도 있으면 프록시 거쳐 온 바깥 요청
+_fails, _fails_lock = {}, threading.Lock()  # 틀린 로그인: 주소 → [시각…] (5분에 5번까지)
+
+
+def gateway_ip():
+    """도커 안에서 기본 게이트웨이(= 이 컴퓨터) 주소."""
+    try:
+        for line in open("/proc/net/route").read().splitlines()[1:]:
+            f = line.split()
+            if f[1] == "00000000":
+                return ipaddress.IPv4Address(int(f[2], 16).to_bytes(4, "little")).exploded
+    except (OSError, ValueError, IndexError):
+        pass
+    return None
+
+
+LOCAL_PEERS = {"127.0.0.1", "::1"} | ({gateway_ip()} - {None} if os.environ.get("TRUST_GATEWAY") == "1" else set())
+
+
+def setting(k, default=""):
+    r = db.q("SELECT value FROM settings WHERE key=?", (k,))
+    return r[0]["value"] if r else default
+
+
+def set_setting(k, v):
+    db.x("INSERT INTO settings(key, value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (k, v))
+
+
+def pw_hash(pw):
+    salt = secrets.token_bytes(16)
+    return f"scrypt$16384$8$1${salt.hex()}${hashlib.scrypt(pw.encode(), salt=salt, n=16384, r=8, p=1, dklen=32).hex()}"
+
+
+def pw_ok(pw, stored):
+    try:
+        _, n, r, p, salt, h = stored.split("$")
+        got = hashlib.scrypt(str(pw or "").encode(), salt=bytes.fromhex(salt), n=int(n), r=int(r), p=int(p), dklen=32)
+        return hmac.compare_digest(got.hex(), h)
+    except (ValueError, TypeError):
+        return False
+
+
+def tok_hash(t):
+    return hashlib.sha256(t.encode()).hexdigest()
 
 
 def now():
@@ -1057,10 +1115,12 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):
         pass
 
-    def send(self, code, body, ctype="application/json; charset=utf-8", cache="no-store"):
+    def send(self, code, body, ctype="application/json; charset=utf-8", cache="no-store", headers=()):
         if not isinstance(body, bytes):
             body = json.dumps(body, ensure_ascii=False).encode()
         self.send_response(code)
+        for k, v in headers:
+            self.send_header(k, v)
         self.send_header("Content-Type", ctype)
         self.send_header("Cache-Control", cache)
         self.send_header("Content-Length", str(len(body)))
@@ -1217,6 +1277,105 @@ class Handler(BaseHTTPRequestHandler):
         params = {k: unquote_plus(v) for k, v in params.items()}
         return [unquote(p) for p in path.split("/") if p], params
 
+    # ---- 잠금 ----
+    def is_local(self):
+        """이 컴퓨터에서 바로 연 요청인지 (프록시 표시가 없고 루프백·도커 게이트웨이에서 옴)."""
+        if any(self.headers.get(k) for k in FWD_HEADERS):
+            return False
+        ip = self.client_address[0]
+        return (ip[7:] if ip.startswith("::ffff:") else ip) in LOCAL_PEERS
+
+    def peer(self):
+        return (self.headers.get("X-Forwarded-For") or "").split(",")[0].strip() or self.client_address[0]
+
+    def session_ok(self):
+        c = SimpleCookie()
+        try:
+            c.load(self.headers.get("Cookie") or "")
+        except Exception:
+            return False
+        t = c.get(COOKIE)
+        return bool(t and db.q("SELECT 1 FROM sessions WHERE token=? AND expires>?", (tok_hash(t.value), time.time())))
+
+    def need_login(self):
+        mode = setting("auth_mode", "off")
+        if mode not in ("remote", "always") or not setting("auth_hash"):
+            return False
+        return not (mode == "remote" and self.is_local())
+
+    def authed(self):
+        return not self.need_login() or self.session_ok()
+
+    def gate(self):
+        """잠겨 있고 로그인 안 했으면 401 보내고 False."""
+        if self.authed():
+            return True
+        self.close_connection = True  # 올리던 본문을 안 읽고 끊음
+        self.send(401, {"error": "로그인이 필요해요", "login": True})
+        return False
+
+    def new_session(self):
+        t = secrets.token_urlsafe(32)
+        db.x("DELETE FROM sessions WHERE expires<?", (time.time(),))
+        db.x("INSERT INTO sessions(token, created, expires) VALUES (?,?,?)", (tok_hash(t), now(), time.time() + SESSION_DAYS * 86400))
+        secure = "; Secure" if self.headers.get("X-Forwarded-Proto") == "https" else ""
+        return ("Set-Cookie", f"{COOKIE}={t}; Path=/; Max-Age={SESSION_DAYS * 86400}; HttpOnly; SameSite=Strict{secure}")
+
+    def too_many(self):
+        with _fails_lock:
+            l = [x for x in _fails.get(self.peer(), []) if x > time.time() - 300]
+            _fails[self.peer()] = l
+            return len(l) >= 5
+
+    def failed(self):
+        with _fails_lock:
+            _fails.setdefault(self.peer(), []).append(time.time())
+
+    def auth_info(self):
+        return {"mode": setting("auth_mode", "off"), "has_password": bool(setting("auth_hash")), "local": self.is_local(),
+                "need": self.need_login(), "authed": self.authed(), "session": self.session_ok()}
+
+    def auth_post(self, p, d):
+        if p == ["auth", "login"]:
+            if self.too_many():
+                return self.send(429, {"error": "너무 많이 틀렸어요. 5분 뒤에 다시 해 보세요"})
+            if not setting("auth_hash") or not pw_ok(d.get("password"), setting("auth_hash")):
+                self.failed()
+                time.sleep(0.5)
+                return self.send(403, {"error": "비밀번호가 맞지 않아요"})
+            with _fails_lock:
+                _fails.pop(self.peer(), None)
+            return self.send(200, {"ok": True}, headers=[self.new_session()])
+        c = SimpleCookie()  # logout
+        try:
+            c.load(self.headers.get("Cookie") or "")
+        except Exception:
+            pass
+        if c.get(COOKIE):
+            db.x("DELETE FROM sessions WHERE token=?", (tok_hash(c[COOKIE].value),))
+        return self.send(200, {"ok": True}, headers=[("Set-Cookie", f"{COOKIE}=; Path=/; Max-Age=0; HttpOnly; SameSite=Strict")])
+
+    def auth_put(self, d):
+        """잠금 바꾸기. 비밀번호가 있으면 지금 비밀번호를 꼭 확인."""
+        has = setting("auth_hash")
+        if has:
+            if self.too_many():
+                return self.send(429, {"error": "너무 많이 틀렸어요. 5분 뒤에 다시 해 보세요"})
+            if not pw_ok(d.get("current"), has):
+                self.failed()
+                return self.send(403, {"error": "지금 비밀번호가 맞지 않아요"})
+        new = str(d.get("password") or "")
+        if new and len(new) < 6:
+            return self.send(400, {"error": "비밀번호는 6자 이상으로 해 주세요"})
+        mode = d.get("mode") if d.get("mode") in AUTH_MODES else setting("auth_mode", "off")
+        if mode != "off" and not (new or has):
+            return self.send(400, {"error": "먼저 비밀번호를 정해 주세요"})
+        if new:
+            set_setting("auth_hash", pw_hash(new))
+            db.x("DELETE FROM sessions")  # 비밀번호를 바꾸면 다른 기기 로그인은 모두 풀림
+        set_setting("auth_mode", mode)
+        return self.send(200, {"ok": True}, headers=[self.new_session()] if mode != "off" else [])
+
     def write_ok(self):
         if self.headers.get("X-BS") != "1":
             self.close_connection = True
@@ -1229,6 +1388,12 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if not parts or parts == ["index.html"]:
                 return self.send(200, (APP / "index.html").read_bytes(), "text/html; charset=utf-8", "no-cache")
+            if parts == ["api", "auth"]:
+                return self.send(200, self.auth_info())
+            if parts == ["api", "health"] and not self.authed():
+                return self.send(200, {"ok": True, "locked": True})
+            if not self.gate():
+                return
             if parts[0] == "m" and len(parts) == 2 and re.fullmatch(MEDIA_RE, parts[1]):
                 return self.send_file(MEDIA / parts[1], CTYPES[parts[1].rsplit(".", 1)[1]])
             if parts[0] == "f" and len(parts) == 2 and re.fullmatch(FILE_RE, parts[1]):
@@ -1299,6 +1464,10 @@ class Handler(BaseHTTPRequestHandler):
                 return
             d = self.body()
             p = parts[1:] if parts[:1] == ["api"] else None
+            if p in (["auth", "login"], ["auth", "logout"]):
+                return self.auth_post(p, d)
+            if not self.gate():
+                return
             if p == ["bots"]:
                 vals = clean(d, BOT_FIELDS)
                 vals.setdefault("name", "이름 없는 봇")
@@ -1455,10 +1624,14 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if not self.write_ok():
                 return
+            if not self.gate():
+                return
             p = parts[1:] if parts[:1] == ["api"] else None
             if p == ["upload"]:
                 return self.put_upload(params)
             d = self.body()
+            if p == ["auth"]:
+                return self.auth_put(d)
             if p and len(p) == 2 and p[0] == "bots" and p[1].isdigit():
                 bid = int(p[1])
                 b = db.q("SELECT cover FROM bots WHERE id=?", (bid,))
@@ -1658,6 +1831,8 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if not self.write_ok():
                 return
+            if not self.gate():
+                return
             p = parts[1:] if parts[:1] == ["api"] else None
             if p and len(p) == 2 and p[0] in LABELS:
                 what = LABELS[p[0]][0]
@@ -1754,6 +1929,10 @@ if __name__ == "__main__":
     for t in FILES.glob("*.part"):
         t.unlink()
     db = DB(DATA / "botshelf.db")
+    if os.environ.get("RESET_AUTH") == "1":  # 비밀번호를 잊었을 때: 잠금 끄고 비밀번호·로그인 지움
+        db.x("DELETE FROM settings WHERE key IN ('auth_mode', 'auth_hash')")
+        db.x("DELETE FROM sessions")
+        print("잠금을 풀었어요 (RESET_AUTH) — 이제 RESET_AUTH 줄을 지우고 다시 켜 주세요", flush=True)
     threading.Thread(target=backup_loop, daemon=True).start()
     print(f"봇카이브 http://{HOST}:{PORT}", flush=True)
     ThreadingHTTPServer((HOST, PORT), Handler).serve_forever()

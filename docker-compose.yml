@@ -12,6 +12,8 @@ services:
       - DATA_DIR=/data
       - PORT=8391
       - HOST=0.0.0.0
+      - TRUST_GATEWAY=1          # 이 컴퓨터에서 바로 연 요청을 알아보기 (잠금 '밖에서만' 모드)
+      - RESET_AUTH=${BOTSHELF_RESET_AUTH:-}
       - TZ=${TZ:-Asia/Seoul}
     volumes:
       - ./app:/app:ro
