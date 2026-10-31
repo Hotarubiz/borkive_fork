@@ -37,6 +37,7 @@ API (JSON):
   POST   /api/styles/<id>/bots {bot_id, role: official|mine}   DELETE /api/styles/<id>/bots/<bot_id>   그림체 ↔ 봇 잇기
   GET    /api/styles/export?ids=1,2      그림체 파일(.botkive-style.json, 그림 포함)   POST /api/styles/import (그 파일 내용)
          그림체 = 그림 생성 프롬프트(작가·스타일 태그) + 견본 그림. 분류 stypes(이름표), 폴더 scope style.
+  GET    /api/stats                      홈 숫자: 봇 수·상태별, 지금 버전 로어북 토큰·항목, 채팅 로그 토큰, 지금 버전 에셋 수 (토큰은 어림값)
   GET    /api/auth   PUT /api/auth {mode, current, password}   POST /api/auth/login {password}   POST /api/auth/logout
   PUT    /api/marks                      {chat_id, idx, on, memo, image, drop_image} 장면 표시
   GET    /api/health
@@ -125,6 +126,7 @@ JSON_COLS = {"info"}
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS folders (id INTEGER PRIMARY KEY, name TEXT NOT NULL, color TEXT, sort INTEGER DEFAULT 0, created TEXT);
+CREATE TABLE IF NOT EXISTS file_stats (file TEXT PRIMARY KEY, data TEXT);
 CREATE TABLE IF NOT EXISTS stypes (key TEXT PRIMARY KEY, name TEXT NOT NULL, color TEXT, sort INTEGER DEFAULT 0, builtin INTEGER DEFAULT 0);
 CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT);
 CREATE TABLE IF NOT EXISTS sessions (token TEXT PRIMARY KEY, created TEXT, expires REAL);
@@ -265,6 +267,8 @@ class DB:
         if not self.c.execute("SELECT 1 FROM itypes LIMIT 1").fetchone():
             for i, (k, n, col) in enumerate(DEFAULT_ITYPES):
                 self.c.execute("INSERT INTO itypes(key, name, color, sort, builtin) VALUES (?,?,?,?,1)", (k, n, col, i))
+        if "tokens" not in [r["name"] for r in self.c.execute("PRAGMA table_info(chats)")]:  # 채팅 로그 토큰 어림값 (NULL = 아직 안 셈)
+            self.c.execute("ALTER TABLE chats ADD COLUMN tokens INTEGER")
         if "chars" not in [r["name"] for r in self.c.execute("PRAGMA table_info(styles)")]:  # 그림체 캐릭터 칸 (NAI v4) [{prompt, negative}]
             self.c.execute("ALTER TABLE styles ADD COLUMN chars TEXT DEFAULT '[]'")
         if "ep" not in [r["name"] for r in self.c.execute("PRAGMA table_info(chats)")]:  # 시리즈 화 번호 직접 지정 (NULL = 제목에서 읽음)
@@ -1072,6 +1076,73 @@ def file_module(fname):
             return risum_main(fh)[0]
 
 
+# ---- 홈 숫자 ----
+# 토큰은 어림값: 한글·한자·가나 1자 ≈ 1토큰, 영어·숫자 4자 ≈ 1토큰(단어마다 최소 1), 기호 2개 ≈ 1토큰. 모델마다 실제 값은 달라요
+_TK_CJK = re.compile(r"[가-힣぀-ヿ一-鿿]")
+_TK_WORD = re.compile(r"[A-Za-z0-9]+")
+_TK_SYM = re.compile(r"[^\sA-Za-z0-9가-힣぀-ヿ一-鿿]")
+
+
+def est_tokens(t):
+    if not t:
+        return 0
+    return round(len(_TK_CJK.findall(t)) + sum(max(1.0, len(w) / 4) for w in _TK_WORD.findall(t)) + len(_TK_SYM.findall(t)) / 2)
+
+
+_ext_re = re.compile(r"(\.(png|webp|jpe?g|gif|avif|mp4|webm|mp3|wav|ogg))+$")  # 카드는 에셋 이름에 확장자를 한 번 더 붙이기도 해서 (…webp.webp) 떼고 비교
+
+
+def file_stat(fname):
+    """카드·모듈 파일 하나의 로어북 항목(이름+내용 해시, 토큰)과 에셋 이름 해시. 파일은 안 바뀌니 한 번 세어 file_stats에 둠.
+    해시로 두는 건 같은 봇의 카드 속 모듈과 따로 올린 모듈이 겹칠 때 한 번만 세려고."""
+    r = db.q("SELECT data FROM file_stats WHERE file=?", (fname,))
+    if r:
+        d = json.loads(r[0]["data"])
+        if d.get("v") == 3:
+            return d
+    hx = lambda *x: hashlib.sha1("|".join(map(str, x)).encode()).hexdigest()[:10]
+    st = {"v": 3, "lore": [], "assets": []}
+    try:
+        for src in file_lore(fname)["sources"]:
+            if src.get("pinned"):  # 카드 프롬프트(설명·글로벌 노트 등)는 로어북이 아님
+                continue
+            st["lore"] += [[hx(e.get("name"), e.get("content")), est_tokens(e.get("content"))] for e in src["entries"] if e.get("mode") != "folder"]
+    except Exception:
+        pass
+    try:
+        st["assets"] = [hx(_ext_re.sub("", str(a.get("name") or "").lower()) or f"#{i}") for src in file_assets(fname)["sources"] for i, a in enumerate(src["assets"])]
+    except Exception:
+        pass
+    db.x("INSERT OR REPLACE INTO file_stats(file, data) VALUES (?,?)", (fname, json.dumps(st)))
+    return st
+
+
+def lib_stats():
+    bots = db.q("SELECT id, status FROM bots WHERE COALESCE(itype, '') = ''")
+    out = {"bots": len(bots), "status": {}, "lore_tokens": 0, "lore_entries": 0, "lore_bots": 0, "assets": 0, "asset_bots": 0}
+    for b in bots:
+        out["status"][b["status"]] = out["status"].get(b["status"], 0) + 1
+        cur = current_version(b["id"], create=False)
+        fs = db.q("SELECT file FROM files WHERE bot_id=? AND kind IN ('card', 'module') AND " + ("version_id=?" if cur else "version_id IS NULL"),
+                  (b["id"], cur) if cur else (b["id"],))
+        lore, assets = {}, set()  # 봇마다 겹치는 건 한 번만
+        for f in fs:
+            st = file_stat(f["file"])
+            lore.update(dict(st["lore"]))
+            assets.update(st["assets"])
+        out["lore_tokens"] += sum(lore.values())
+        out["lore_entries"] += len(lore)
+        out["assets"] += len(assets)
+        out["lore_bots"] += bool(lore)
+        out["asset_bots"] += bool(assets)
+    for c in db.q("SELECT id FROM chats WHERE tokens IS NULL"):  # 채팅 로그는 올린 뒤 안 바뀌니 한 번만 셈
+        n = sum(est_tokens(m["text"]) for m in db.q("SELECT text FROM messages WHERE chat_id=?", (c["id"],)))
+        db.x("UPDATE chats SET tokens=? WHERE id=?", (n, c["id"]))
+    r = db.q("SELECT COUNT(*) AS n, COALESCE(SUM(tokens), 0) AS t, (SELECT COUNT(*) FROM messages) AS m FROM chats")[0]
+    out.update(chats=r["n"], chat_tokens=r["t"], messages=r["m"])
+    return out
+
+
 def file_lore(fname):
     """카드 로어북 + 모듈 로어북을 출처별로."""
     srcs, name = [], ""
@@ -1560,6 +1631,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self.relay_realm(p[1])
             if p == ["health"]:
                 return self.send(200, {"ok": True, "bots": db.q("SELECT COUNT(*) AS n FROM bots")[0]["n"], "chats": db.q("SELECT COUNT(*) AS n FROM chats")[0]["n"]})
+            if p == ["stats"]:
+                return self.send(200, lib_stats())
             if p == ["state"]:
                 return self.send(200, state())
             if p == ["bots"]:

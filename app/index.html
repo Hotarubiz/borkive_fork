@@ -585,7 +585,13 @@ body.entry .side,body.entry .topbar{display:none}
 .mtop{display:flex;align-items:center;gap:6px;margin-bottom:34px}
 .mtop .logo{padding:0;font-size:30px;margin-right:auto}
 .mtop .ib{width:40px;height:40px;border-radius:10px}
-.mhead{margin-bottom:26px}
+.mhead{margin-bottom:22px}
+.mstats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin:0 0 26px}
+.mst{display:flex;flex-direction:column;gap:2px;min-width:0;padding:16px 18px;border-radius:16px;background:var(--card);border:1px solid var(--line)}
+.mst span{font-size:13px;font-weight:600;color:var(--ink3)}
+.mst b{font-family:var(--disp);font-size:32px;line-height:1.2;color:var(--ink)}
+.mst small{font-size:12px;color:var(--mute);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+@media (max-width:760px){.mstats{grid-template-columns:repeat(2,minmax(0,1fr))}.mst b{font-size:26px}}
 .mhead .k{font-size:13px;font-weight:600;letter-spacing:.08em;color:var(--acc)}
 .mhead h1{margin:6px 0 6px;font-family:var(--disp);font-size:40px;line-height:1.25}
 .mhead p{margin:0;color:var(--ink3)}
@@ -1369,6 +1375,18 @@ function dropZone(el, onFiles) {
   el.addEventListener('drop', e => { e.preventDefault(); el.classList.remove('over'); onFiles([...e.dataTransfer.files]); });
 }
 
+// ---- 홈 숫자: 봇 · 지금 버전 로어북 토큰 · 채팅 로그 토큰 · 지금 버전 에셋 (처음 셀 때는 몇 초 걸려서 나중에 채움) ----
+const bigNum = n => n >= 1e8 ? `${+(n / 1e8).toFixed(1)}억` : n >= 1e4 ? `${+(n / 1e4).toFixed(1)}만` : n.toLocaleString('ko-KR');
+function statTiles(t, nBots) {
+  const tile = (label, n, sub, title = '') => `<div class="mst"${title ? ` title="${h(title)}"` : ''}><span>${label}</span><b>${n == null ? '…' : bigNum(n)}</b><small>${sub || '&nbsp;'}</small></div>`;
+  const tk = '토큰은 어림값이에요 — 한글 1자 ≈ 1토큰, 영어 4자 ≈ 1토큰. 쓰는 모델마다 달라요.';
+  if (!t) return [tile('봇', nBots, ''), tile('로어북 토큰', null, '세는 중…'), tile('채팅 로그 토큰', null, '세는 중…'), tile('에셋', null, '세는 중…')].join('');
+  return [tile('봇', t.bots, Object.entries(STATUS).map(([k, v]) => t.status[k] ? `${h(v)} ${t.status[k]}` : '').filter(Boolean).join(' · ')),
+    tile('로어북 토큰', t.lore_tokens, `지금 버전 · 항목 ${t.lore_entries.toLocaleString('ko-KR')}개 · 봇 ${t.lore_bots}개`, `${t.lore_tokens.toLocaleString('ko-KR')} 토큰 — ${tk}`),
+    tile('채팅 로그 토큰', t.chat_tokens, `로그 ${t.chats}개 · 메시지 ${t.messages.toLocaleString('ko-KR')}개`, `${t.chat_tokens.toLocaleString('ko-KR')} 토큰 — ${tk}`),
+    tile('에셋', t.assets, `지금 버전 · 봇 ${t.asset_bots}개`, `${t.assets.toLocaleString('ko-KR')}개 (카드·모듈 속 그림 등)`)].join('');
+}
+
 // ---- 홈: 폴더 입구 ----
 async function viewMain() {
   const [bots, ch] = await Promise.all([api('GET', '/api/bots'), api('GET', '/api/chats')]);
@@ -1404,9 +1422,10 @@ async function viewMain() {
       <button class="ib" data-act="theme" aria-label="테마" title="테마">${ic('palette', 20)}</button>
       <button class="ib" data-act="lock" aria-label="잠금" title="잠금 (로그인)">${ic('lock', 20)}</button>
       <button class="btn sm pri" data-act="add" style="margin-left:6px">${ic('plus', 16)}<span class="t">봇 들이기</span></button></div>
-    <div class="mhead"><div class="k">봇 ${bots.length} · 채팅 로그 ${st.chats} · 자료 ${st.items} · 그림체 ${st.styles}</div>
+    <div class="mhead"><div class="k">자료 ${st.items} · 그림체 ${st.styles}</div>
       <h1>오늘은 누구를 꺼낼까요</h1>
       <p>${playing ? `지금 ${h(STATUS.playing)}인 봇이 ${playing}개 있어요.` : '리스에 다 넣어 두지 않아도, 여기 꽂아 두면 잊지 않아요.'}</p></div>
+    <div class="mstats" id="mStats">${statTiles(null, bots.length)}</div>
     <div class="mgrid">
       ${card('#/all', '서재 전체', 'var(--acc)', bots, botFolders().filter(f => f.count).map(f => `${h(f.name)} ${f.count}`).join(' · '))}
       ${botFolders().map(f => card(`#/f/${f.id}`, f.name, f.color, bots.filter(b => b.folders.includes(f.id)))).join('')}
@@ -1421,6 +1440,7 @@ async function viewMain() {
       <div class="chats">${chats.map(c => chatRow(c, true)).join('')}</div></div>` : ''}
     ${bots.length ? '' : `<div class="empty"><h3>아직 꽂힌 봇이 없어요</h3><p>리스에서 내보낸 카드 파일(.charx · .png · .jpeg)을 넣어 보세요.</p><button class="btn pri" data-act="add">${ic('plus')}봇 들이기</button></div>`}
   </div>`;
+  api('GET', '/api/stats').then(t => { if ($('#mStats')) $('#mStats').innerHTML = statTiles(t); }).catch(() => {});
 }
 
 // ---- 서재 ----
