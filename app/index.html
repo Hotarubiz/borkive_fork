@@ -1387,9 +1387,38 @@ function statTiles(t, nBots) {
     tile('에셋', t.assets, `지금 버전 · 봇 ${t.asset_bots}개`, `${t.assets.toLocaleString('ko-KR')}개 (카드·모듈 속 그림 등)`)].join('');
 }
 
+// ---- 홈 인사말: 계절 × 시간대 (같은 날 같은 시간대엔 같은 말), 특별한 날은 따로 ----
+const GREET = {
+  spring: {dawn: ['새벽 벚꽃 사이로, 누구를 꺼낼까요', '잠 못 드는 봄 새벽이에요'], morning: ['봄 아침, 첫 장을 넘겨 볼까요', '꽃 피는 아침이에요. 누구부터 볼까요'],
+    day: ['나른한 봄 오후, 누구를 꺼낼까요', '햇살 좋은 봄날, 한 권 꺼내 볼까요'], evening: ['봄 저녁 바람이 좋아요. 누구를 만날까요', '노을 지는 봄 저녁이에요'],
+    night: ['봄밤엔 긴 이야기가 어울려요', '꽃내음 나는 밤, 누구를 꺼낼까요']},
+  summer: {dawn: ['짧은 여름밤이 끝나 가요. 한 장만 더?', '여름 새벽, 아직 깨어 있네요'], morning: ['여름 아침, 시원하게 시작해 볼까요', '매미보다 먼저 일어났네요'],
+    day: ['더운 오후엔 서늘한 이야기 어때요', '에어컨 아래서 누구를 꺼낼까요'], evening: ['해가 긴 여름 저녁, 천천히 골라요', '소나기 그친 저녁이에요'],
+    night: ['열대야엔 긴 이야기가 제맛이죠', '여름밤, 누구와 밤을 새울까요']},
+  autumn: {dawn: ['가을 새벽 공기가 차요. 누구를 꺼낼까요', '서늘한 새벽, 한 권만 더'], morning: ['가을 아침, 책장 넘기기 좋은 날이에요', '선선한 아침이에요. 누구부터 볼까요'],
+    day: ['독서하기 좋은 가을 오후예요', '하늘 높은 날, 누구를 꺼낼까요'], evening: ['해가 일찍 져요. 누구와 저녁을 보낼까요', '단풍빛 저녁이에요'],
+    night: ['긴 가을밤, 누구를 꺼낼까요', '귀뚜라미 우는 밤이에요']},
+  winter: {dawn: ['겨울 새벽, 이불 속에서 한 장만 더', '눈 오는 새벽일까요? 누구를 꺼낼까요'], morning: ['추운 아침이에요. 따뜻한 이야기 어때요', '겨울 아침, 핫초코와 함께 골라요'],
+    day: ['짧은 겨울 낮, 누구를 꺼낼까요', '창밖이 하얀 오후예요'], evening: ['일찍 어두워졌어요. 누구를 만날까요', '겨울 저녁, 난롯가에서 한 권'],
+    night: ['긴 겨울밤엔 긴 이야기를', '눈 내리는 밤, 누구를 꺼낼까요']}};
+const GREET_DAY = {'1-1': '새해 첫 장, 누구와 열까요', '2-14': '발렌타인데이, 누구에게 마음이 가나요', '10-31': '할로윈 밤, 무서운 이야기 어때요',
+  '12-24': '크리스마스이브엔 누구를 꺼낼까요', '12-25': '메리 크리스마스! 누구와 보낼까요', '12-31': '올해 마지막 날, 누구와 마무리할까요'};
+const SEASON = {spring: '🌸 봄', summer: '🌿 여름', autumn: '🍂 가을', winter: '❄️ 겨울'};
+const DAYPART = {dawn: '새벽', morning: '아침', day: '낮', evening: '저녁', night: '밤'};
+function greeting(d = new Date()) {
+  const mo = d.getMonth() + 1, hr = d.getHours();
+  const season = mo >= 3 && mo <= 5 ? 'spring' : mo >= 6 && mo <= 8 ? 'summer' : mo >= 9 && mo <= 11 ? 'autumn' : 'winter';
+  const part = hr < 5 ? 'dawn' : hr < 11 ? 'morning' : hr < 17 ? 'day' : hr < 21 ? 'evening' : 'night';
+  const k = `${SEASON[season]} ${DAYPART[part]}`, special = GREET_DAY[`${mo}-${d.getDate()}`];
+  if (special) return {k, title: special};
+  const l = GREET[season][part], seed = [...`${d.getFullYear()}-${mo}-${d.getDate()}-${part}`].reduce((a, c) => a * 31 + c.charCodeAt(0) >>> 0, 7);
+  return {k, title: l[seed % l.length]};
+}
+
 // ---- 홈: 폴더 입구 ----
 async function viewMain() {
   const [bots, ch] = await Promise.all([api('GET', '/api/bots'), api('GET', '/api/chats')]);
+  const gr = greeting();
   const st = S.state;
   const playing = bots.filter(b => b.status === 'playing').length;
   const fan = l => {
@@ -1422,8 +1451,8 @@ async function viewMain() {
       <button class="ib" data-act="theme" aria-label="테마" title="테마">${ic('palette', 20)}</button>
       <button class="ib" data-act="lock" aria-label="잠금" title="잠금 (로그인)">${ic('lock', 20)}</button>
       <button class="btn sm pri" data-act="add" style="margin-left:6px">${ic('plus', 16)}<span class="t">봇 들이기</span></button></div>
-    <div class="mhead"><div class="k">자료 ${st.items} · 그림체 ${st.styles}</div>
-      <h1>오늘은 누구를 꺼낼까요</h1>
+    <div class="mhead"><div class="k">${h(gr.k)} · 자료 ${st.items} · 그림체 ${st.styles}</div>
+      <h1>${h(gr.title)}</h1>
       <p>${playing ? `지금 ${h(STATUS.playing)}인 봇이 ${playing}개 있어요.` : '리스에 다 넣어 두지 않아도, 여기 꽂아 두면 잊지 않아요.'}</p></div>
     <div class="mstats" id="mStats">${statTiles(null, bots.length)}</div>
     <div class="mgrid">
