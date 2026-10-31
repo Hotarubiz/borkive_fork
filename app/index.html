@@ -1458,7 +1458,7 @@ async function viewMain() {
       <button class="ib" data-act="theme" aria-label="테마" title="테마">${ic('palette', 20)}</button>
       <button class="ib" data-act="lock" aria-label="잠금" title="잠금 (로그인)">${ic('lock', 20)}</button>
       <button class="btn sm pri" data-act="add" style="margin-left:6px">${ic('plus', 16)}<span class="t">봇 들이기</span></button></div>
-    <div class="mhead"><div class="k">${h(gr.k)} · 자료 ${st.items} · 그림체 ${st.styles}</div>
+    <div class="mhead"><div class="k">자료 ${st.items} · 그림체 ${st.styles}</div>
       <h1>${h(gr.title)}</h1>
       <p>${playing ? `지금 ${h(STATUS.playing)}인 봇이 ${playing}개 있어요.` : '리스에 다 넣어 두지 않아도, 여기 꽂아 두면 잊지 않아요.'}</p></div>
     <div class="mstats" id="mStats">${statTiles(null, bots.length)}</div>
