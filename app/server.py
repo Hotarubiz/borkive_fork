@@ -2271,6 +2271,8 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if not parts or parts == ["index.html"]:
                 return self.send(200, (APP / "index.html").read_bytes(), "text/html; charset=utf-8", "no-cache")
+            if parts == ["bulk.js"]:
+                return self.send(200, (APP / "bulk.js").read_bytes(), "text/javascript; charset=utf-8", "no-cache")
             if parts == ["api", "auth"]:
                 return self.send(200, self.auth_info())
             if parts == ["api", "health"] and not self.authed():
