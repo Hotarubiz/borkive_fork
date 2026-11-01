@@ -556,6 +556,7 @@ img.emo{display:block;max-width:min(300px,100%);max-height:380px;width:auto;marg
 .toast{position:fixed;left:50%;bottom:28px;transform:translateX(-50%);z-index:70;padding:12px 18px;border-radius:12px;background:var(--line);border:1px solid var(--line3);box-shadow:0 10px 30px rgba(0,0,0,.5);font-size:14px;max-width:calc(100vw - 32px)}
 .toast.err{border-color:var(--red-line);background:var(--red-bg)}
 .hint{font-size:13px;color:var(--mute);margin:0}
+.mfoot{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:40px;padding-top:18px;border-top:1px solid var(--line);font-size:13px;color:var(--mute)}
 .err-t{color:var(--red);font-size:13.5px;margin:0}
 
 /* 테마 고르기 */
@@ -910,6 +911,7 @@ function renderSide() {
     <div class="grow"></div>
     <button class="nav" data-act="theme" style="border:0;background:none;width:100%;margin-top:12px">${ic('palette')}테마·글꼴<span class="n">${h(themeName())}</span></button>
     <button class="nav" data-act="lock" style="border:0;background:none;width:100%">${ic('lock')}잠금<span class="n">${LOCK[(S.auth || {}).mode] || LOCK.off}</span></button>
+    <button class="nav" data-act="export" style="border:0;background:none;width:100%">${ic('dl')}전부 내보내기</button>
     <button class="btn pri" data-act="add" style="margin:8px 4px 0">${ic('plus', 18)}봇 들이기</button>`;
 }
 document.addEventListener('click', e => {
@@ -920,7 +922,22 @@ document.addEventListener('click', e => {
   if (act === 'newfolder') folderDialog().then(f => f && loadState().then(() => document.body.classList.contains('entry') && route()));
   if (act === 'theme') { document.body.classList.remove('drawer'); themeDialog(); }
   if (act === 'lock') { document.body.classList.remove('drawer'); lockDialog(); }
+  if (act === 'export') { document.body.classList.remove('drawer'); exportDialog(); }
 });
+// ---- 전부 내보내기: 봇카이브 없이도 열리는 폴더로 ----
+function exportDialog() {
+  const m = modal(`<header><h2>전부 내보내기</h2>${xBtn}</header>
+    <div class="bd">
+      <p style="margin:0">봇 · 자료 · 그림체를 <b>폴더째 압축 파일 하나</b>로 받아요. 봇카이브가 없어도 열어 볼 수 있어요.</p>
+      <ul class="hint" style="margin:0;padding-left:18px;line-height:1.8">
+        <li><b>봇/폴더/봇 이름/버전 이름/</b> — 올린 원본 그대로(카드 · 모듈 · 프리셋)와 소개글</li>
+        <li><b>채팅 로그</b>는 리스 형식(.json) — 리스에 다시 넣을 수 있어요</li>
+        <li><b>그림체</b>는 프롬프트 글 파일 · 샘플 그림 · 그림체 파일</li>
+        <li>봇마다 info.txt에 상태 · 태그 · 폴더 · 메모가 적혀 있어요</li></ul>
+    </div>
+    <footer><span class="note">서재 크기만큼 커요</span><button class="btn" data-close>닫기</button><a class="btn pri" href="/api/export" download data-go>${ic('dl', 16)}내려받기</a></footer>`, 'narrow');
+  $('[data-go]', m).onclick = () => { setTimeout(() => m.close(), 300); toast('내려받기를 시작했어요'); };
+}
 $('#menuBtn').onclick = () => document.body.classList.toggle('drawer');
 document.addEventListener('click', e => { if (document.body.classList.contains('drawer') && (e.target.closest('.side a') || !e.target.closest('.side,#menuBtn'))) document.body.classList.remove('drawer'); });
 
@@ -1475,6 +1492,7 @@ async function viewMain() {
     ${chats.length ? `<div class="msec"><div class="secth"><h2>최근 채팅 로그</h2><a href="#/chats">모두 보기 →</a></div>
       <div class="chats">${chats.map(c => chatRow(c, true)).join('')}</div></div>` : ''}
     ${bots.length ? '' : `<div class="empty"><h3>아직 꽂힌 봇이 없어요</h3><p>리스에서 내보낸 카드 파일(.charx · .png · .jpeg)을 넣어 보세요.</p><button class="btn pri" data-act="add">${ic('plus')}봇 들이기</button></div>`}
+    <div class="mfoot"><button class="btn sm ghost" data-act="export">${ic('dl', 16)}전부 내보내기</button><span>봇카이브 없이도 열리는 폴더로 받아 두기</span></div>
   </div>`;
   api('GET', '/api/stats').then(t => { if ($('#mStats')) $('#mStats').innerHTML = statTiles(t); }).catch(() => {});
 }

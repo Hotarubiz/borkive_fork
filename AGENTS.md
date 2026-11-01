@@ -93,7 +93,13 @@ cd app; $env:DATA_DIR = "..\data"; python server.py   # 윈도우 PowerShell
   - `styles`, `style_images`, `style_folders`, `bot_styles`: 그림체(프롬프트·설정 + 견본 그림), 그림체 폴더, 봇 ↔ 그림체(`role` official|mine)
   - `settings`, `sessions`: 잠금 설정과 로그인
   - `shelves`: 예전 자료함 칸
-- 그림은 `data/media/`, 원본 파일은 `data/files/`(무작위 이름), 백업은 `data/backups/`.
+- 그림은 `data/media/`, 백업은 `data/backups/`.
+- 원본 파일은 `data/bots/<봇 id 4자리>/v<버전 id>/<올린 이름>` (자료는 `data/items/`, 봇 없는 파일은 `data/loose/`). 버전 없는 파일은 봇 폴더 바로 아래.
+  - `files.file` = 바뀌지 않는 토큰(주소 `/f/<토큰>`·캐시 열쇠), `files.path` = `data` 기준 실제 자리. 원본을 열 때는 항상 `fpath(토큰)`.
+  - 옮기기는 `place_file()`만 써요. 새 자리를 먼저 적고(`moving` = 예전 자리) 옮겨서, 중간에 꺼져도 켤 때 `settle_files()`가 마저 옮겨요.
+  - 봇 폴더마다 `info.txt`(사람용 메모)를 봇카이브가 고쳐 써요. 거꾸로 읽지는 않아요.
+  - 예전 `data/files/`(무작위 이름)는 켤 때 자동으로 봇 폴더로 옮겨져요.
+- `GET /api/export`: 전부 내보내기 zip을 흘려보내요(`봇/<첫 폴더>/<봇>/<버전 이름>/` · `자료함/<종류>/` · `그림체/<분류>/` · `봇카이브.json`).
 
 ### 규칙
 - **외부 패키지·빌드 도구를 들이지 마세요.** 서버는 표준 라이브러리만, 화면은 순수 JS예요.
@@ -112,7 +118,7 @@ cd app; $env:DATA_DIR = "..\data"; python server.py   # 윈도우 PowerShell
 ### 시험
 자동 시험은 없어요. **진짜 자료로 시험하지 말고 복사본으로** 하세요.
 
-1. DB 복사본 만들기 (켜진 채로도 안전하게):
+1. DB 복사본 만들기 (켜진 채로도 안전하게). 원본 파일까지 시험하려면 `data/bots`·`data/items`·`data/media`도 복사하세요:
    ```bash
    mkdir -p /tmp/bk-test/backups
    python3 -c "import sqlite3; s=sqlite3.connect('data/botshelf.db'); d=sqlite3.connect('/tmp/bk-test/botshelf.db'); s.backup(d); d.close()"
