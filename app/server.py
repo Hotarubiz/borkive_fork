@@ -37,6 +37,9 @@ API (JSON):
   POST   /api/styles/<id>/images {images}   PUT|DELETE /api/style_images/<id> ({front: true} = 대표 그림)
   POST   /api/styles/<id>/bots {bot_id, role: official|mine}   DELETE /api/styles/<id>/bots/<bot_id>   그림체 ↔ 봇 잇기
   GET    /api/export                     전부 내보내기 zip (봇/<폴더>/<봇>/버전/원본 · 채팅 로그 · 그림체 · 봇카이브.json)
+  POST   /api/import {name, size, key}  →  {id, have}   PUT /api/import/<id>?at=<받아 둔 크기> (조각, 64MB까지)
+         POST /api/import/<id>/run   GET /api/import/<id> {state up|run|done|error, done, total, msg, result}   DELETE /api/import/<id>
+         들이기 = 전부 내보내기 zip을 이 서재에 더함 (끊기면 같은 파일로 이어 올림, 이름·만든 사람이 같은 봇은 건너뜀)
   GET    /api/styles/export?ids=1,2      그림체 파일(.botkive-style.json, 그림 포함)   POST /api/styles/import (그 파일 내용)
          그림체 = 그림 생성 프롬프트(작가·스타일 태그) + 견본 그림. 분류 stypes(이름표), 폴더 scope style.
   GET    /api/stats                      홈 숫자: 봇 수·상태별, 지금 버전 로어북 토큰·항목, 채팅 로그 토큰, 지금 버전 에셋 수 (토큰은 어림값)
@@ -53,6 +56,7 @@ import json
 import os
 import re
 import secrets
+import shutil
 import socket
 import sqlite3
 import threading
@@ -720,7 +724,7 @@ class Cleaner(HTMLParser):
             if not src:
                 return
             self.srcs.append(src)
-            emoji = tag == "img" and bool(TWEMOJI_RE.search(src))
+            emoji = tag == "img" and (bool(TWEMOJI_RE.search(src)) or "emoji" in a.get("class", "").split())  # 이미 정리한 글을 다시 정리할 때도
             if self.fix:
                 orig, src = src, self.fix(src)
                 if not src:  # 이모지 그림은 alt에 글자가 들어 있는 경우가 많음
@@ -1080,9 +1084,10 @@ def intro_doc(title, html):
 
 def risu_chat(c):
     """리스의 채팅 불러오기로 다시 넣을 수 있는 risuChat (앱의 채팅 내려받기와 같은 모양)."""
-    msgs = db.q("SELECT role, text, at FROM messages WHERE chat_id=? ORDER BY idx", (c["id"],))
+    msgs = db.q("SELECT role, name, text, at FROM messages WHERE chat_id=? ORDER BY idx", (c["id"],))
     data = {"name": c["title"], "note": c["memo"] or "", "localLore": [], "fmIndex": -1,
-            "message": [{"role": "user" if m["role"] == "user" else "char", "data": m["text"], **({"time": m["at"]} if m["at"] else {})} for m in msgs]}
+            "message": [{"role": "user" if m["role"] == "user" else "char", "data": m["text"], **({"time": m["at"]} if m["at"] else {}),
+                         **({"name": m["name"]} if m["name"] else {})} for m in msgs]}
     return json.dumps({"type": "risuChat", "ver": 1, "data": data}, ensure_ascii=False)
 
 
@@ -1107,12 +1112,13 @@ def export_zip(out):
     root = f"봇카이브 내보내기 {datetime.now(KST):%Y-%m-%d}"
     names = lambda t: {r["key"]: r["name"] for r in db.q(f"SELECT key, name FROM {t}")}
     statuses, itypes, stypes = names("statuses"), names("itypes"), names("stypes")
-    folders = {r["id"]: r for r in db.q("SELECT id, name, scope FROM folders")}
     taken = {}  # 폴더 → 쓴 이름 (소문자)
     slot = lambda d, n: f"{d}/{free_name(safe_name(n, 'file'), taken.setdefault(d, set()))}"
     text = lambda arc, s: z.writestr(zipfile.ZipInfo(arc, time.localtime()[:6]), s, compress_type=zipfile.ZIP_DEFLATED)
-    manifest = {"format": "botkive-export", "version": 1, "exported": now(), "statuses": statuses, "itypes": itypes, "stypes": stypes,
-                "folders": [{"name": f["name"], "scope": f["scope"] or "bot"} for f in folders.values()], "bots": [], "styles": []}
+    colors = {t: {r["key"]: r["color"] for r in db.q(f"SELECT key, color FROM {t}")} for t in LABELS}
+    folders = {r["id"]: r for r in db.q("SELECT id, name, scope, color FROM folders ORDER BY sort, id")}
+    manifest = {"format": "botkive-export", "version": 1, "exported": now(), "statuses": statuses, "itypes": itypes, "stypes": stypes, "colors": colors,
+                "folders": [{"name": f["name"], "scope": f["scope"] or "bot", "color": f["color"]} for f in folders.values()], "bots": [], "styles": []}
     with zipfile.ZipFile(out, "w", allowZip64=True) as z:
         def media(arc, name):
             f = MEDIA / name if name and re.fullmatch(MEDIA_RE, name) else None
@@ -1135,8 +1141,8 @@ def export_zip(out):
             group = f"자료함/{safe_name(itypes.get(item, item) or '기타')}" if item else f"봇/{safe_name(fl[0] if fl else '폴더 없음')}"
             bdir = slot(f"{root}/{group}", b["name"] or f"봇 {b['id']}")
             taken[bdir] = {"info.txt", "채팅 로그"}
-            mb = {k: b[k] for k in ("name", "creator", "status", "itype", "in_risu", "memo", "created", "updated")} | {
-                "tags": tags_of(b["tags"]), "folders": fl, "dir": bdir[len(root) + 1:], "versions": [], "loose": [], "chats": [],
+            mb = {k: b[k] for k in ("name", "creator", "status", "itype", "in_risu", "memo", "info", "created", "updated")} | {
+                "tags": tags_of(b["tags"]), "rx": json.loads(b["rx"] or "{}"), "folders": fl, "dir": bdir[len(root) + 1:], "versions": [], "loose": [], "chats": [],
                 "links": db.q("SELECT title, url, note FROM links WHERE bot_id=? ORDER BY sort, id", (b["id"],))}
             if b["cover"]:
                 arc = slot(bdir, "표지." + b["cover"].rsplit(".", 1)[1])
@@ -1168,11 +1174,15 @@ def export_zip(out):
                 mb["versions"].append(mv)
             if loose := [f for f in files if not f["version_id"]]:
                 d = slot(bdir, "버전 없이 둔 파일")
+                mb["loose_dir"] = d.rsplit("/", 1)[1]
                 mb["loose"] = [put(d, f) for f in loose]
             for c in db.q("SELECT id, title, memo, series, ep, source FROM chats WHERE bot_id=? ORDER BY first_at, id", (b["id"],)):
                 arc = slot(f"{bdir}/채팅 로그", (c["title"] or "채팅 로그") + ".json")
                 text(arc, risu_chat(c))
-                marks = db.q("SELECT idx, memo FROM marks WHERE chat_id=? ORDER BY idx", (c["id"],))
+                marks = db.q("SELECT idx, memo, image FROM marks WHERE chat_id=? ORDER BY idx", (c["id"],))
+                for mk in marks:
+                    if mk["image"]:
+                        media(f"{bdir}/채팅 로그/그림/{mk['image']}", mk["image"])
                 mb["chats"].append({k: c[k] for k in ("title", "memo", "series", "ep", "source")} | {"file": arc.rsplit("/", 1)[1], "marks": marks})
             text(f"{bdir}/info.txt", info_text(b["id"], vdir, fnames))
             manifest["bots"].append(mb)
@@ -1197,6 +1207,286 @@ def export_zip(out):
             manifest["styles"].append({"name": s["name"], "dir": sdir[len(root) + 1:], "folders": [folders[i]["name"] for i in s["folders"] if i in folders], "bots": linked})
         text(f"{root}/읽어 주세요.txt", EXPORT_README)
         text(f"{root}/봇카이브.json", json.dumps(manifest, ensure_ascii=False, indent=1))
+
+
+# ---- 들이기: 전부 내보내기 zip을 조각으로 받아(끊겨도 이어서) 이 서재에 더함 ----
+IMPORT_CHUNK = 64_000_000  # 조각 하나 최대 (화면은 16MB씩)
+IMPORTS = {}               # 토큰 → {state: up|run|done|error, size, name, done, total, msg, result}
+_import_lock = threading.Lock()
+
+
+def import_part(tok):
+    return TMP / f"import-{tok}.zip"
+
+
+def import_zip(path, job):
+    """봇카이브.json을 따라 봇·버전·원본·소개글·채팅·그림체를 새로 만듦. 이름·만든 사람이 같은 봇은 건너뜀. 중간에 멈추면 만든 것을 걷어 냄."""
+    try:
+        z = zipfile.ZipFile(path)
+    except (zipfile.BadZipFile, OSError):
+        raise ValueError("압축 파일이 아니거나 덜 받아진 파일이에요")
+    made = {"bots": [], "styles": [], "media": []}
+    try:
+        with z:
+            return _import_zip(z, job, made)
+    except Exception:
+        for bid in made["bots"]:
+            for f in db.q("SELECT file, path FROM files WHERE bot_id=?", (bid,)):
+                drop_file(f)
+            db.x("DELETE FROM bots WHERE id=?", (bid,))
+            drop_home(bid)
+        for sid in made["styles"]:
+            imgs = [g["image"] for g in db.q("SELECT image FROM style_images WHERE style_id=?", (sid,))]
+            db.x("DELETE FROM styles WHERE id=?", (sid,))
+            drop_media(*imgs)
+        drop_media(*made["media"])
+        raise
+
+
+def _import_zip(z, job, made):
+    ents = {i.filename: i for i in z.infolist() if not i.is_dir()}
+    mans = sorted((n for n in ents if n.rsplit("/", 1)[-1] == "봇카이브.json"), key=lambda n: n.count("/"))
+    if not mans:
+        raise ValueError("봇카이브 내보내기 파일이 아니에요 (봇카이브.json이 없어요)")
+    root = mans[0][:-len("봇카이브.json")]
+    try:
+        m = json.loads(z.read(mans[0]))
+    except ValueError:
+        m = None
+    if not isinstance(m, dict) or m.get("format") != "botkive-export":
+        raise ValueError("봇카이브 내보내기 파일이 아니에요")
+    if not isinstance(m.get("version"), int) or m["version"] > 1:
+        raise ValueError("더 새 봇카이브에서 내보낸 파일이에요 — 봇카이브를 업데이트한 뒤 들여 주세요")
+    need = sum(i.file_size for i in ents.values())
+    if shutil.disk_usage(DATA).free < need + 200_000_000:
+        raise ValueError(f"빈자리가 모자라요 — 풀어 넣으려면 {need / 1e9:.1f}GB쯤 필요해요")
+    job.update(total=need, done=0, msg="봇을 들이는 중")
+    ent = lambda rel: ents.get(root + rel) if isinstance(rel, str) and rel else None
+    lst = lambda v: v if isinstance(v, list) else []
+    txt = lambda v, n: str(v or "").strip()[:n]
+    when = lambda v: v if isinstance(v, str) and re.fullmatch(r"\d{4}-\d\d-\d\dT[\d:+.\-]+", v) else now()
+    out = {"bots": 0, "items": 0, "styles": 0, "chats": 0, "files": 0, "missing": 0, "skipped": [], "skipped_styles": [], "failed_styles": []}
+
+    def take(info, dest):
+        part = dest.with_name(dest.name + ".part")
+        try:
+            with z.open(info) as src, open(part, "wb") as fh:
+                while chunk := src.read(1 << 20):
+                    fh.write(chunk)
+                    job["done"] += len(chunk)
+        except Exception:
+            part.unlink(missing_ok=True)
+            raise
+        part.replace(dest)
+
+    seen_media = {}
+
+    def media(rel, orig=None):
+        """zip 속 그림 → media/ 새 이름 (같은 그림은 한 번만)."""
+        key = orig or rel
+        if key not in seen_media:
+            info, ext = ent(rel), rel.rsplit(".", 1)[-1].lower()
+            seen_media[key] = None
+            if info and re.fullmatch(MEDIA_RE, f"{'0' * 20}.{ext}"):
+                name = f"{secrets.token_hex(10)}.{ext}"
+                take(info, MEDIA / name)
+                made["media"].append(name)
+                seen_media[key] = name
+        return seen_media[key]
+
+    def intro(d, fname):
+        """내보낸 소개글 문서 → 본문 HTML (그림/x → /m/새 이름, 허용 태그만)."""
+        info = ent(f"{d}/{fname}") if fname else None
+        if not info or info.file_size > 20_000_000:
+            return ""
+        doc = z.read(info).decode("utf-8", "replace")
+        b = re.search(r"<body[^>]*>(.*)</body>", doc, re.S)
+        body = re.sub(r'그림/(' + MEDIA_RE + r')', lambda g: f"/m/{n}" if (n := media(f"{d}/그림/{g.group(1)}", g.group(1))) else g.group(0),
+                      b.group(1) if b else doc)
+        c = Cleaner(lambda u: u if re.fullmatch(r"/m/" + MEDIA_RE, u) else None)
+        c.feed(body)
+        return c.result().strip()[:3_000_000]
+
+    labels = {}
+
+    def label(t, key, fallback):
+        """내보낸 서재의 이름표 키 → 여기 키 (같은 키 · 같은 이름 · 새로 더하기 · 안 되면 기본)."""
+        key = txt(key, 40)
+        if not key:
+            return fallback
+        if (t, key) not in labels:
+            name = txt((m.get(t) or {}).get(key), 12)
+            hit = db.q(f"SELECT key FROM {t} WHERE key=?", (key,)) or (db.q(f"SELECT key FROM {t} WHERE name=?", (name,)) if name else [])
+            if hit:
+                labels[t, key] = hit[0]["key"]
+            elif name and re.fullmatch(r"[a-z0-9]{1,20}", key) and db.q(f"SELECT COUNT(*) AS n FROM {t}")[0]["n"] < LABELS[t][1]:
+                color = ((m.get("colors") or {}).get(t) or {}).get(key)
+                db.x(f"INSERT INTO {t}(key, name, color, sort) VALUES (?,?,?,(SELECT COALESCE(MAX(sort),0)+1 FROM {t}))",
+                     (key, name, color if color in COLORS else "#C7C5CC"))
+                labels[t, key] = key
+            else:
+                labels[t, key] = fallback
+        return labels[t, key]
+
+    fids = {}
+    fresh = not db.q("SELECT 1 FROM bots LIMIT 1") and not db.q("SELECT 1 FROM styles LIMIT 1")  # 새로 설치한 빈 서재면 폴더 색·목록까지 그대로
+    for f in lst(m.get("folders")):  # 빈 폴더까지 그대로 (같은 이름이 있으면 그 폴더)
+        if not isinstance(f, dict) or not txt(f.get("name"), 20):
+            continue
+        name, scope = txt(f.get("name"), 20), f.get("scope") if f.get("scope") in ("item", "style") else "bot"
+        hit = db.q("SELECT id FROM folders WHERE name=? AND COALESCE(scope, 'bot')=?", (name, scope))
+        if hit and fresh and f.get("color") in COLORS:
+            db.x("UPDATE folders SET color=? WHERE id=?", (f["color"], hit[0]["id"]))
+        fids[scope, name] = hit[0]["id"] if hit else db.x(
+            "INSERT INTO folders(name, color, sort, created, scope) VALUES (?,?,(SELECT COALESCE(MAX(sort),0)+1 FROM folders),?,?)",
+            (name, f.get("color") if f.get("color") in COLORS else "#C7C5CC", now(), scope))[0]
+
+    if fresh and fids:  # 처음 깔 때 생긴 기본 폴더 중 내보낸 서재에 없던 것
+        for n, _ in DEFAULT_FOLDERS:
+            if ("bot", n) not in fids:
+                db.x("DELETE FROM folders WHERE name=? AND COALESCE(scope, 'bot')='bot' AND id NOT IN (SELECT folder_id FROM bot_folders)", (n,))
+    have = {(r["name"], r["creator"] or "", bool(r["itype"])) for r in db.q("SELECT name, creator, itype FROM bots")}
+    new_bots = {}  # 이름 → 새 id (그림체 잇기용)
+
+    def add_file(bid, vid, d, mf):
+        info = ent(f"{d}/{mf.get('file')}") if isinstance(mf, dict) else None
+        if not info:
+            out["missing"] += 1
+            return
+        fname = secrets.token_hex(12)
+        TMP.mkdir(exist_ok=True)
+        take(info, TMP / fname)
+        name = re.sub(r'[\x00-\x1f/\\]', "_", txt(mf.get("name"), 200) or str(mf["file"]))[:200] or "file"
+        fid, _ = db.x("INSERT INTO files(bot_id, version_id, kind, name, file, path, size, note, created) VALUES (?,?,?,?,?,?,?,?,?)",
+                      (bid, vid, mf.get("kind") if mf.get("kind") in KINDS else "etc", name, fname, f"tmp/{fname}", info.file_size,
+                       txt(mf.get("note"), 2000), now()))
+        place_file(fid)
+        out["files"] += 1
+
+    for mb in lst(m.get("bots")):
+        if not isinstance(mb, dict):
+            continue
+        item = txt(mb.get("itype"), 40)
+        vals = clean({k: mb[k] for k in ("name", "creator", "in_risu", "memo", "info") if k in mb}, BOT_FIELDS)
+        vals.setdefault("name", "이름 없는 봇")
+        if (vals["name"], vals.get("creator", ""), bool(item)) in have:
+            out["skipped"].append(vals["name"])
+            continue
+        job["msg"] = f"봇을 들이는 중 — {vals['name']}"
+        bdir = txt(mb.get("dir"), 2000)
+        vals |= {"status": label("statuses", mb.get("status"), "later"), "itype": label("itypes", item, "etc") if item else "",
+                 "tags": json.dumps(clean_tags(mb.get("tags")), ensure_ascii=False), "created": when(mb.get("created")), "updated": when(mb.get("updated")),
+                 "rx": json.dumps({k: v for k, v in (mb.get("rx") if isinstance(mb.get("rx"), dict) else {}).items()
+                                   if re.fullmatch(r"[0-9a-f]{12}", str(k)) and v in RX_MODES})}
+        if mb.get("cover"):
+            vals["cover"] = media(f"{bdir}/{mb['cover']}")
+        if mb.get("basic"):
+            vals["basic"] = intro(bdir, mb["basic"])
+        bid, _ = db.x(f"INSERT INTO bots({', '.join(vals)}) VALUES ({','.join('?' * len(vals))})", tuple(vals.values()))
+        made["bots"].append(bid)
+        new_bots.setdefault(vals["name"], bid)
+        scope = "item" if item else "bot"
+        db.many("INSERT OR IGNORE INTO bot_folders(bot_id, folder_id) VALUES (?,?)",
+                [(bid, fids[scope, n]) for n in map(lambda x: txt(x, 20), lst(mb.get("folders"))) if (scope, n) in fids])
+        db.many("INSERT INTO links(bot_id, title, url, note, sort) VALUES (?,?,?,?,?)",
+                [(bid, txt(l.get("title"), 100), txt(l.get("url"), 1000), txt(l.get("note"), 500), i) for i, l in enumerate(lst(mb.get("links")))
+                 if isinstance(l, dict) and re.match(r"https?://", str(l.get("url") or ""))])
+        cur = None
+        for mv in lst(mb.get("versions")):
+            if not isinstance(mv, dict):
+                continue
+            d = f"{bdir}/{mv.get('dir')}"
+            vid, _ = db.x("INSERT INTO versions(bot_id, name, note, released, current, info, basic, created) VALUES (?,?,?,?,0,?,?,?)",
+                          (bid, txt(mv.get("name"), 40), txt(mv.get("note"), 4000), txt(mv.get("released"), 20),
+                           json.dumps(mv.get("info") if isinstance(mv.get("info"), dict) else {}, ensure_ascii=False)[:400_000],
+                           intro(d, mv.get("basic")), when(mv.get("created"))))
+            if mv.get("current") and not cur:
+                cur = vid
+            for mf in lst(mv.get("files")):
+                add_file(bid, vid, d, mf)
+            for i, it in enumerate(lst(mv.get("intros"))):
+                if isinstance(it, dict) and (html := intro(d, it.get("file"))):
+                    db.x("INSERT INTO intros(version_id, title, html, url, author, at, sort) VALUES (?,?,?,?,?,?,?)",
+                         (vid, txt(it.get("title"), 200), html, txt(it.get("url"), 1000), txt(it.get("author"), 200), txt(it.get("at"), 40) or None, i + 1))
+        if cur or (cur := db.q("SELECT MAX(id) AS id FROM versions WHERE bot_id=?", (bid,))[0]["id"]):
+            db.x("UPDATE versions SET current=1 WHERE id=?", (cur,))
+        for mf in lst(mb.get("loose")):
+            add_file(bid, None, f"{bdir}/{txt(mb.get('loose_dir'), 200) or '버전 없이 둔 파일'}", mf)
+        for mc in lst(mb.get("chats")):
+            info = ent(f"{bdir}/채팅 로그/{mc.get('file')}") if isinstance(mc, dict) else None
+            if not info or info.file_size > 300_000_000:
+                continue
+            try:
+                data = json.loads(z.read(info)).get("data") or {}
+                msgs = clean_messages([{"r": x.get("role"), "n": x.get("name"), "t": x.get("data"), "at": x.get("time")}
+                                       for x in lst(data.get("message")) if isinstance(x, dict)])
+            except (ValueError, AttributeError):
+                msgs = []
+            if not msgs:
+                continue
+            ats = [x[4] for x in msgs if x[4]]
+            ep = mc.get("ep")
+            cid, _ = db.x("""INSERT INTO chats(bot_id, title, memo, source, series, ep, count, first_at, last_at, created, updated)
+                             VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+                          (bid, txt(mc.get("title"), 200) or "채팅 로그", str(mc.get("memo") or "")[:20000], txt(mc.get("source"), 200),
+                           txt(mc.get("series"), 100), ep if isinstance(ep, int) else None, len(msgs), min(ats) if ats else None, max(ats) if ats else None, now(), now()))
+            db.many("INSERT INTO messages(chat_id, idx, role, name, text, at) VALUES (?,?,?,?,?,?)", [(cid, *x) for x in msgs])
+            db.many("INSERT OR IGNORE INTO marks(chat_id, idx, memo, image, created) VALUES (?,?,?,?,?)",
+                    [(cid, k["idx"], str(k.get("memo") or "")[:4000],
+                      media(f"{bdir}/채팅 로그/그림/{k['image']}", k["image"]) if re.fullmatch(MEDIA_RE, str(k.get("image") or "")) else None, now())
+                     for k in lst(mc.get("marks")) if isinstance(k, dict) and isinstance(k.get("idx"), int) and 0 <= k["idx"] < len(msgs)])
+            out["chats"] += 1
+        write_info(bid)
+        out["items" if item else "bots"] += 1
+
+    job["msg"] = "그림체를 들이는 중"
+    styles = {r["name"] for r in db.q("SELECT name FROM styles")}
+    for ms in lst(m.get("styles")):
+        if not isinstance(ms, dict) or not ms.get("dir"):
+            continue
+        sd = root + str(ms["dir"]) + "/"
+        js = [n for n in ents if n.startswith(sd) and n.endswith(".botkive-style.json") and "/" not in n[len(sd):]]
+        if not js:
+            continue
+        if txt(ms.get("name"), 200) in styles:
+            out["skipped_styles"].append(txt(ms.get("name"), 200))
+            continue
+        try:
+            ids = style_import(json.loads(z.read(js[0])))
+        except ValueError:  # 그림체 파일 하나가 깨졌으면 그것만 빼고
+            out["failed_styles"].append(txt(ms.get("name"), 200))
+            continue
+        made["styles"] += ids
+        for sid in ids:
+            db.many("INSERT OR IGNORE INTO style_folders(style_id, folder_id) VALUES (?,?)",
+                    [(sid, fids["style", n]) for n in map(lambda x: txt(x, 20), lst(ms.get("folders"))) if ("style", n) in fids])
+            for lk in lst(ms.get("bots")):
+                name = txt(lk.get("name"), 300) if isinstance(lk, dict) else ""
+                bid = new_bots.get(name) or next((r["id"] for r in db.q("SELECT id FROM bots WHERE name=? ORDER BY id LIMIT 1", (name,))), None)
+                if bid:
+                    db.x("INSERT OR IGNORE INTO bot_styles(bot_id, style_id, role) VALUES (?,?,?)", (bid, sid, "official" if lk.get("role") == "official" else "mine"))
+        out["styles"] += len(ids)
+    job["done"] = job["total"]
+    return out
+
+
+def run_import(tok):
+    job = IMPORTS[tok]
+    try:
+        job["result"] = import_zip(import_part(tok), job)
+        job.update(state="done", msg="끝")
+        r = job["result"]
+        print(f"들이기 끝: 봇 {r['bots']} · 자료 {r['items']} · 그림체 {r['styles']} · 채팅 {r['chats']} · 원본 {r['files']} (건너뜀 {len(r['skipped'])})", flush=True)
+    except ValueError as e:
+        job.update(state="error", msg=str(e))
+    except zipfile.BadZipFile as e:  # 받다 망가진 압축 파일 (속 파일 CRC가 안 맞음 등)
+        print(f"들이기 오류: {e!r}", flush=True)
+        job.update(state="error", msg="압축 파일 속 파일이 망가져 있어요 — 다시 내보내서 들여 주세요. 들이던 것은 걷어 냈어요")
+    except Exception as e:
+        print(f"들이기 오류: {e!r}", flush=True)
+        job.update(state="error", msg=f"들이다 멈췄어요 — 들인 것은 걷어 냈어요 ({e!r})")
+    finally:
+        import_part(tok).unlink(missing_ok=True)
 
 
 def clean_tags(v):
@@ -2014,6 +2304,9 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send(200, style_rows())
             if p == ["export"]:
                 return self.send_export()
+            if p and len(p) == 2 and p[0] == "import":
+                job = IMPORTS.get(p[1])
+                return self.send(200, job) if job else self.send(404, {"error": "없는 들이기예요"})
             if p == ["styles", "export"]:
                 ids = [int(x) for x in params.get("ids", "").split(",") if x.isdigit()]
                 one = style_detail(ids[0]) if len(ids) == 1 else None
@@ -2082,6 +2375,10 @@ class Handler(BaseHTTPRequestHandler):
                 return
             if p == ["styles"]:
                 return self.send(200, style_detail(new_style(d)))
+            if p == ["import"]:
+                return self.import_start(d)
+            if p and len(p) == 3 and p[0] == "import" and p[2] == "run":
+                return self.import_run(p[1])
             if p == ["styles", "import"]:
                 ids = style_import(d)
                 return self.send(200, {"ok": True, "ids": ids})
@@ -2259,6 +2556,8 @@ class Handler(BaseHTTPRequestHandler):
             p = parts[1:] if parts[:1] == ["api"] else None
             if p == ["upload"]:
                 return self.put_upload(params)
+            if p and len(p) == 2 and p[0] == "import":
+                return self.put_import(p[1], params)
             d = self.body()
             if p == ["auth"]:
                 return self.auth_put(d)
@@ -2439,6 +2738,68 @@ class Handler(BaseHTTPRequestHandler):
         except Exception as e:
             self.send(500, {"error": repr(e)})
 
+    def import_start(self, d):
+        """들이기 시작 · 이어 올리기 — 같은 파일(이름·크기·고친 때)이면 받아 둔 데까지 알려 줌."""
+        size = d.get("size")
+        if not isinstance(size, int) or size <= 0:
+            return self.send(400, {"error": "파일 크기를 모르겠어요"})
+        tok = hashlib.sha256(f"{d.get('key')}|{size}".encode()).hexdigest()[:24]
+        with _import_lock:
+            if any(j["state"] == "run" for j in IMPORTS.values()):
+                return self.send(409, {"error": "다른 들이기가 아직 진행 중이에요"})
+            TMP.mkdir(exist_ok=True)
+            part = import_part(tok)
+            have = part.stat().st_size if part.is_file() else 0
+            if have > size:
+                part.unlink()
+                have = 0
+            if shutil.disk_usage(DATA).free < 2 * size - have + 200_000_000:  # 올릴 것 + 풀어 넣을 것
+                return self.send(400, {"error": f"빈자리가 모자라요 — 올리고 풀어 넣으려면 {(2 * size - have) / 1e9:.1f}GB쯤 필요해요"})
+            IMPORTS[tok] = {"state": "up", "size": size, "name": str(d.get("name") or "")[:200], "done": 0, "total": 0, "msg": "", "result": None}
+        return self.send(200, {"id": tok, "have": have})
+
+    def put_import(self, tok, params):
+        """조각 하나를 이어 붙임 (at = 서버가 받아 둔 크기와 같아야 함 — 다르면 409와 함께 알려 줌)."""
+        self.close_connection = True
+        job = IMPORTS.get(tok)
+        if not job or job["state"] != "up":
+            return self.send(404, {"error": "들이기를 처음부터 다시 시작해 주세요"})
+        n = int(self.headers.get("Content-Length", "0"))
+        if not 0 < n <= IMPORT_CHUNK:
+            return self.send(413, {"error": "조각이 너무 커요"})
+        with _import_lock:
+            part = import_part(tok)
+            have = part.stat().st_size if part.is_file() else 0
+            if params.get("at") != str(have) or have + n > job["size"]:
+                return self.send(409, {"error": "받아 둔 곳이 달라요", "have": have})
+            left = n
+            with open(part, "ab") as fh:
+                while left > 0:
+                    chunk = self.rfile.read(min(1 << 20, left))
+                    if not chunk:
+                        break
+                    fh.write(chunk)
+                    left -= len(chunk)
+                if left:
+                    fh.truncate(have)
+        if left:
+            return self.send(400, {"error": "조각이 중간에 끊겼어요", "have": have})
+        return self.send(200, {"have": have + n})
+
+    def import_run(self, tok):
+        job = IMPORTS.get(tok)
+        if not job or job["state"] != "up":
+            return self.send(404, {"error": "들이기를 처음부터 다시 시작해 주세요"})
+        with _import_lock:
+            if any(j["state"] == "run" for j in IMPORTS.values()):
+                return self.send(409, {"error": "다른 들이기가 아직 진행 중이에요"})
+            part = import_part(tok)
+            if not part.is_file() or part.stat().st_size != job["size"]:
+                return self.send(400, {"error": "아직 다 안 올라왔어요"})
+            job.update(state="run", msg="압축 파일을 살피는 중")
+        threading.Thread(target=run_import, args=(tok,), daemon=True).start()
+        return self.send(200, {"ok": True})
+
     def put_upload(self, params):
         """파일 원본을 그대로 받아 디스크에 씀 (1MB씩)."""
         self.close_connection = True
@@ -2494,6 +2855,12 @@ class Handler(BaseHTTPRequestHandler):
             if not self.gate():
                 return
             p = parts[1:] if parts[:1] == ["api"] else None
+            if p and len(p) == 2 and p[0] == "import":  # 올리다 만 들이기 지우기
+                with _import_lock:
+                    if (IMPORTS.get(p[1]) or {}).get("state") != "run":
+                        IMPORTS.pop(p[1], None)
+                        import_part(p[1]).unlink(missing_ok=True)
+                return self.send(200, {"ok": True})
             if p and len(p) == 2 and p[0] in LABELS:
                 what = LABELS[p[0]][0]
                 st = db.q(f"SELECT builtin FROM {p[0]} WHERE key=?", (p[1],))
@@ -2616,6 +2983,9 @@ if __name__ == "__main__":
     MEDIA.mkdir(parents=True, exist_ok=True)
     for t in [*FILES.glob("*.part"), *TMP.glob("*.part")]:
         t.unlink()
+    for t in TMP.glob("import-*.zip"):  # 올리다 만 들이기는 사흘 두고 이어 올릴 수 있게
+        if time.time() - t.stat().st_mtime > 3 * 86400:
+            t.unlink()
     db = DB(DATA / "botshelf.db")
     settle_files()
     if os.environ.get("RESET_AUTH") == "1":  # 비밀번호를 잊었을 때: 잠금 끄고 비밀번호·로그인 지움
