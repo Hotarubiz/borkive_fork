@@ -3726,5 +3726,6 @@ async function route() {
 window.addEventListener('hashchange', route);
 loadState().then(route).catch(e => { if (e.login) return; $('#view').innerHTML = `<div class="wrap"><div class="empty"><h3>서버에 연결하지 못했어요</h3><p>${h(e.message)}</p></div></div>`; });
 </script>
+<script src="/bulk.js"></script>
 </body>
 </html>
