@@ -109,7 +109,7 @@
     btn.onclick = async () => {
       if (busy) return;
       const targets = rows.map((r,i)=>({r,i,el:$(`[data-i="${i}"]`,list)})).filter(x => !x.r.done && !x.r.blocked && $('[data-use]',x.el).checked);
-      if (!targets.length) return toast('등록할 카드를 선택하시와요'.replace('하시와요','해주세요'), true);
+      if (!targets.length) return toast('등록할 카드를 선택해 주세요', true);
       busy = true; btn.disabled = true;
       $$('[data-close]',m).forEach(b=>b.disabled = true);
       const sharedCreator = $('#bkWho',m).value.trim();
