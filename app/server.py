@@ -529,20 +529,30 @@ def settle_files():
     """켤 때: 옮기다 만 파일을 마저 옮기고, 예전 자리(files/ 무작위 이름)나 올리다 만 파일을 봇 폴더로."""
     for f in db.q("SELECT id, path, moving FROM files WHERE moving IS NOT NULL AND moving != ''"):
         new, old = DATA / f["path"], DATA / f["moving"]
-        if not new.is_file() and old.is_file():
-            new.parent.mkdir(parents=True, exist_ok=True)
-            os.replace(old, new)
-            prune(old.parent)
-        db.x("UPDATE files SET moving=NULL WHERE id=?", (f["id"],))
-    moved = 0
-    for f in db.q("SELECT id, path FROM files"):
+        try:
+            if not new.is_file() and old.is_file():
+                new.parent.mkdir(parents=True, exist_ok=True)
+                os.replace(old, new)
+                prune(old.parent)
+            db.x("UPDATE files SET moving=NULL WHERE id=?", (f["id"],))
+        except OSError as e:  # 못 옮기면 예전 자리에서 그대로 읽고, 다음에 켤 때 다시
+            print(f"파일 옮기기 오류 {f['id']}: {e!r}", flush=True)
+    if FILES.is_dir() and db.q("SELECT 1 FROM files WHERE path IS NULL LIMIT 1"):  # 예전 구조에서 처음 옮길 때만
+        (DATA / "backups").mkdir(exist_ok=True)
+        dst = sqlite3.connect(DATA / "backups" / f"pre-layout-{datetime.now(KST):%Y-%m-%d}.db")
+        db.c.backup(dst)
+        dst.close()
+    stray = lambda: db.q("SELECT COUNT(*) AS n FROM files WHERE path IS NULL OR path LIKE 'files/%' OR path LIKE 'tmp/%'")[0]["n"]
+    before = stray()
+    for f in db.q("SELECT id FROM files"):
         try:
             place_file(f["id"])
-            moved += not f["path"]
         except Exception as e:
             print(f"파일 옮기기 오류 {f['id']}: {e!r}", flush=True)
-    if moved:
-        print(f"원본 파일 {moved}개를 봇 폴더(bots/ · items/)로 옮겼어요", flush=True)
+    if left := stray():
+        print(f"아직 못 옮긴 파일 {left}개 — 예전 자리에서 그대로 읽고, 다음에 켤 때 다시 옮겨요 (다른 프로그램이 쓰는 중일 때)", flush=True)
+    if before - left:
+        print(f"원본 파일 {before - left}개를 봇 폴더(bots/ · items/)로 옮겼어요", flush=True)
     for d in (FILES, TMP, DATA / "items", DATA / "loose"):  # 빈 자리는 치움 (필요할 때 다시 만듦)
         try:
             d.rmdir()
