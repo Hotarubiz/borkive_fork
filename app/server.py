@@ -39,6 +39,7 @@ API (JSON):
   GET|PUT|DELETE /api/pfiles/<id> (PUT {name, kind, note, persona_id})   GET /api/pfiles/<id>/lore|assets|asset/<n>|masset/<n>   로어북 · 에셋 (봇 파일과 같은 모양)
   GET    /api/pgroups   GET|PUT|DELETE /api/pgroups/<id>   PUT {name, ptype, order: [버전 id…]}
   POST   /api/pgroups/<id>/images {image(data URL), persona_id(null = 폴더 공통), memo}   PUT|DELETE /api/pimages/<id> {memo, persona_id}   갤러리
+  POST   /api/bots/<id>/images {image(data URL), chat_id, idx(메시지 0부터), memo}   PUT|DELETE /api/bimages/<id> {memo, chat_id, idx}   봇 그림 (채팅하며 만든 그림)
          페르소나 = 폴더(사람 하나) 안의 버전들. 버전 = 그림 한 장 + 프롬프트 + 메모. 봇의 기본 페르소나는 PUT /api/bots/<id> {persona_id, fill_chats}
   GET    /api/styles   GET|PUT|DELETE /api/styles/<id>   POST /api/styles {name, stype, prompt, negative, settings, images: [{data, meta}], folders, tags…}
   POST   /api/styles/<id>/images {images, variant_id}   PUT|DELETE /api/style_images/<id> ({front: true} = 대표 그림)
@@ -200,6 +201,9 @@ CREATE TABLE IF NOT EXISTS pgroups (id INTEGER PRIMARY KEY AUTOINCREMENT, name T
 CREATE TABLE IF NOT EXISTS pimages (id INTEGER PRIMARY KEY AUTOINCREMENT, group_id INTEGER REFERENCES pgroups(id) ON DELETE CASCADE,
   persona_id INTEGER, image TEXT NOT NULL, memo TEXT DEFAULT '', created TEXT);
 CREATE INDEX IF NOT EXISTS pimages_group ON pimages(group_id);
+CREATE TABLE IF NOT EXISTS bimages (id INTEGER PRIMARY KEY AUTOINCREMENT, bot_id INTEGER REFERENCES bots(id) ON DELETE CASCADE,
+  chat_id INTEGER REFERENCES chats(id) ON DELETE SET NULL, idx INTEGER, image TEXT, memo TEXT DEFAULT '', created TEXT);
+CREATE INDEX IF NOT EXISTS bimages_bot ON bimages(bot_id);
 CREATE TABLE IF NOT EXISTS pfiles (id INTEGER PRIMARY KEY AUTOINCREMENT, group_id INTEGER REFERENCES pgroups(id) ON DELETE CASCADE,
   persona_id INTEGER, kind TEXT DEFAULT 'etc', name TEXT, note TEXT DEFAULT '', path TEXT, size INTEGER, created TEXT);
 CREATE INDEX IF NOT EXISTS pfiles_group ON pfiles(group_id);
@@ -1509,7 +1513,9 @@ def export_zip(out):
                 d = slot(bdir, "버전 없이 둔 파일")
                 mb["loose_dir"] = d.rsplit("/", 1)[1]
                 mb["loose"] = [put(d, f) for f in loose]
+            cpos = {}
             for c in db.q("SELECT id, title, memo, series, ep, source, persona_id AS persona FROM chats WHERE bot_id=? ORDER BY first_at, id", (b["id"],)):
+                cpos[c["id"]] = len(mb["chats"])
                 arc = slot(f"{bdir}/채팅 로그", (c["title"] or "채팅 로그") + ".json")
                 text(arc, risu_chat(c))
                 marks = db.q("SELECT idx, memo, image FROM marks WHERE chat_id=? ORDER BY idx", (c["id"],))
@@ -1517,6 +1523,10 @@ def export_zip(out):
                     if mk["image"]:
                         media(f"{bdir}/채팅 로그/그림/{mk['image']}", mk["image"])
                 mb["chats"].append({k: c[k] for k in ("title", "memo", "series", "ep", "source", "persona")} | {"file": arc.rsplit("/", 1)[1], "marks": marks})
+            if bims := db.q("SELECT chat_id, idx, image, memo, created FROM bimages WHERE bot_id=? ORDER BY id", (b["id"],)):
+                for r in bims:
+                    media(f"{bdir}/갤러리/{r['image']}", r["image"])
+                mb["images"] = [{"image": r["image"], "chat": cpos.get(r["chat_id"]), "idx": r["idx"], "memo": r["memo"], "created": r["created"]} for r in bims]
             text(f"{bdir}/info.txt", info_text(b["id"], vdir, fnames))
             manifest["bots"].append(mb)
 
@@ -1861,7 +1871,8 @@ def _import_zip(z, job, made):
             db.x("UPDATE versions SET current=1 WHERE id=?", (cur,))
         for mf in lst(mb.get("loose")):
             add_file(bid, None, f"{bdir}/{txt(mb.get('loose_dir'), 200) or '버전 없이 둔 파일'}", mf)
-        for mc in lst(mb.get("chats")):
+        cmap = {}  # 내보낸 채팅 순서 → 새 id (그림 잇기)
+        for ci, mc in enumerate(lst(mb.get("chats"))):
             info = ent(f"{bdir}/채팅 로그/{mc.get('file')}") if isinstance(mc, dict) else None
             if not info or info.file_size > 300_000_000:
                 continue
@@ -1881,11 +1892,17 @@ def _import_zip(z, job, made):
                            txt(mc.get("series"), 100), ep if isinstance(ep, int) else None, len(msgs), min(ats) if ats else None, max(ats) if ats else None, now(), now(),
                            persona_of(mc.get("persona"))))
             db.many("INSERT INTO messages(chat_id, idx, role, name, text, at) VALUES (?,?,?,?,?,?)", [(cid, *x) for x in msgs])
+            cmap[ci] = cid
             db.many("INSERT OR IGNORE INTO marks(chat_id, idx, memo, image, created) VALUES (?,?,?,?,?)",
                     [(cid, k["idx"], str(k.get("memo") or "")[:4000],
                       media(f"{bdir}/채팅 로그/그림/{k['image']}", k["image"]) if re.fullmatch(MEDIA_RE, str(k.get("image") or "")) else None, now())
                      for k in lst(mc.get("marks")) if isinstance(k, dict) and isinstance(k.get("idx"), int) and 0 <= k["idx"] < len(msgs)])
             out["chats"] += 1
+        for r in lst(mb.get("images")):
+            if isinstance(r, dict) and re.fullmatch(MEDIA_RE, str(r.get("image") or "")) and (img := media(f"{bdir}/갤러리/{r['image']}", r["image"])):
+                cid, idx = bimage_link(bid, cmap.get(r.get("chat")) if isinstance(r.get("chat"), int) else None, r.get("idx"))
+                db.x("INSERT INTO bimages(bot_id, chat_id, idx, image, memo, created) VALUES (?,?,?,?,?,?)",
+                     (bid, cid, idx, img, txt(r.get("memo"), 2000), when(r.get("created"))))
         write_info(bid)
         out["items" if item else "bots"] += 1
 
@@ -1987,6 +2004,9 @@ def bot_detail(id):
     for v in b["versions"]:
         v["intros"] = [i for i in ins if i["version_id"] == v["id"]]
     b["chats"] = chat_list(id)
+    b["images"] = bimage_rows(id)
+    b["scene_pics"] = db.q("""SELECT m.chat_id, m.idx, m.image, m.memo, m.created FROM marks m JOIN chats c ON c.id=m.chat_id
+                             WHERE c.bot_id=? AND m.image IS NOT NULL ORDER BY m.created DESC""", (id,))
     b["tags"] = tags_of(b.get("tags"))
     b["styles"] = db.q("""SELECT s.id, s.name, s.stype, bs.role, (SELECT image FROM style_images i WHERE i.style_id=s.id ORDER BY i.variant_id IS NOT NULL, sort, id LIMIT 1) AS cover
                           FROM bot_styles bs JOIN styles s ON s.id=bs.style_id WHERE bs.bot_id=? ORDER BY bs.role='official' DESC, s.name""", (id,))
@@ -1997,6 +2017,18 @@ def bot_detail(id):
     p = db.q("SELECT id, name, label, group_id, image FROM personas WHERE id=?", (b["persona_id"],)) if b.get("persona_id") else []
     b["persona"] = p[0] if p else None
     return b
+
+
+def bimage_rows(bid):
+    return db.q("SELECT id, chat_id, idx, image, memo, created FROM bimages WHERE bot_id=? ORDER BY id DESC", (bid,))
+
+
+def bimage_link(bid, chat_id, idx):
+    """그림을 이을 채팅·메시지 (그 봇 채팅이 아니거나 메시지 번호가 없으면 빼고)."""
+    c = db.q("SELECT count FROM chats WHERE id=? AND bot_id=?", (chat_id, bid)) if isinstance(chat_id, int) else []
+    if not c:
+        return None, None
+    return chat_id, idx if isinstance(idx, int) and not isinstance(idx, bool) and 0 <= idx < (c[0]["count"] or 0) else None
 
 
 # ---- 버전 (카드·모듈·소개글을 업데이트마다 묶음) ----
@@ -2871,6 +2903,15 @@ class Handler(BaseHTTPRequestHandler):
                 return
             if p == ["styles"]:
                 return self.send(200, style_detail(new_style(d)))
+            if len(p) == 3 and p[0] == "bots" and p[1].isdigit() and p[2] == "images":  # {image(data URL), chat_id, idx, memo}
+                bid = int(p[1])
+                if not db.q("SELECT 1 FROM bots WHERE id=?", (bid,)):
+                    return self.send(404, {"error": "봇이 없어요"})
+                cid, idx = bimage_link(bid, d.get("chat_id"), d.get("idx"))
+                img = save_data_url(d.get("image"))
+                iid, _ = db.x("INSERT INTO bimages(bot_id, chat_id, idx, image, memo, created) VALUES (?,?,?,?,?,?)",
+                              (bid, cid, idx, img, str(d.get("memo") or "").strip()[:2000], now()))
+                return self.send(200, {"ok": True, "id": iid, "images": bimage_rows(bid)})
             if len(p) == 3 and p[0] == "pgroups" and p[1].isdigit() and p[2] == "images":  # {image(data URL), persona_id(null = 폴더 공통), memo}
                 gid = int(p[1])
                 if not db.q("SELECT 1 FROM pgroups WHERE id=?", (gid,)):
@@ -3078,8 +3119,8 @@ class Handler(BaseHTTPRequestHandler):
             like = f"%/m/{n}%"
             used = db.q("""SELECT 1 FROM bots WHERE intro_html LIKE ? OR basic LIKE ? OR cover=?
                            UNION SELECT 1 FROM versions WHERE intro_html LIKE ? OR basic LIKE ?
-                           UNION SELECT 1 FROM intros WHERE html LIKE ? UNION SELECT 1 FROM marks WHERE image=? LIMIT 1""",
-                        (like, like, n, like, like, like, n))
+                           UNION SELECT 1 FROM intros WHERE html LIKE ? UNION SELECT 1 FROM marks WHERE image=? UNION SELECT 1 FROM bimages WHERE image=? LIMIT 1""",
+                        (like, like, n, like, like, like, n, n))
             if not used:
                 drop_media(n)
 
@@ -3212,6 +3253,17 @@ class Handler(BaseHTTPRequestHandler):
                     if pid != r[0]["persona_id"]:
                         move_pfile(fid, gid, pid)
                 return self.send(200, {"ok": True, "files": pfile_rows(gid)})
+            if p and len(p) == 2 and p[0] == "bimages" and p[1].isdigit():  # {memo, chat_id(null = 안 이음), idx}
+                r = db.q("SELECT bot_id, chat_id, idx FROM bimages WHERE id=?", (int(p[1]),))
+                if not r:
+                    return self.send(404, {"error": "그림이 없어요"})
+                bid = r[0]["bot_id"]
+                if "memo" in d:
+                    db.x("UPDATE bimages SET memo=? WHERE id=?", (str(d["memo"] or "").strip()[:2000], int(p[1])))
+                if "chat_id" in d or "idx" in d:
+                    cid, idx = bimage_link(bid, d["chat_id"] if "chat_id" in d else r[0]["chat_id"], d["idx"] if "idx" in d else r[0]["idx"])
+                    db.x("UPDATE bimages SET chat_id=?, idx=? WHERE id=?", (cid, idx, int(p[1])))
+                return self.send(200, {"ok": True, "images": bimage_rows(bid)})
             if p and len(p) == 2 and p[0] == "pimages" and p[1].isdigit():  # {memo, persona_id(null = 폴더 공통)}
                 r = db.q("SELECT group_id FROM pimages WHERE id=?", (int(p[1]),))
                 if not r:
@@ -3548,6 +3600,13 @@ class Handler(BaseHTTPRequestHandler):
                 gid = db.q("SELECT group_id FROM personas WHERE id=?", (pid,))[0]["group_id"]
                 drop_persona(pid)
                 return self.send(200, {"ok": True, "group": gid if pgroup_ok(gid) else None})
+            if p and len(p) == 2 and p[0] == "bimages" and p[1].isdigit():
+                r = db.q("SELECT bot_id, image FROM bimages WHERE id=?", (int(p[1]),))
+                if not r:
+                    return self.send(404, {"error": "그림이 없어요"})
+                db.x("DELETE FROM bimages WHERE id=?", (int(p[1]),))
+                self.gc_intro(f" /m/{r[0]['image']}")
+                return self.send(200, {"ok": True, "images": bimage_rows(r[0]["bot_id"])})
             if p and len(p) == 2 and p[0] == "pimages" and p[1].isdigit():
                 r = db.q("SELECT group_id, image FROM pimages WHERE id=?", (int(p[1]),))
                 if not r:
@@ -3607,6 +3666,7 @@ class Handler(BaseHTTPRequestHandler):
                     return self.send(404, {"error": "봇이 없어요"})
                 files = db.q("SELECT file, path FROM files WHERE bot_id=?", (id,))
                 imgs = [m["image"] for m in db.q("SELECT m.image FROM marks m JOIN chats c ON c.id=m.chat_id WHERE c.bot_id=? AND m.image IS NOT NULL", (id,))]
+                imgs += [r["image"] for r in db.q("SELECT image FROM bimages WHERE bot_id=?", (id,))]
                 intros = "".join(v["h"] for v in db.q("SELECT intro_html || COALESCE(basic, '') AS h FROM versions WHERE bot_id=?", (id,))) + "".join(
                     i["html"] for i in db.q("SELECT i.html FROM intros i JOIN versions v ON v.id=i.version_id WHERE v.bot_id=?", (id,)))
                 db.x("DELETE FROM bots WHERE id=?", (id,))
@@ -3650,6 +3710,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send(200, {"ok": True, "bot": bot_detail(i["bot_id"])})
             if p[0] == "chats":
                 imgs = [m["image"] for m in db.q("SELECT image FROM marks WHERE chat_id=? AND image IS NOT NULL", (id,))]
+                db.x("UPDATE bimages SET chat_id=NULL, idx=NULL WHERE chat_id=?", (id,))  # 봇 그림은 남기고 잇기만 풂
                 db.x("DELETE FROM chats WHERE id=?", (id,))
                 self.gc_intro("".join(f" /m/{n}" for n in imgs))
                 return self.send(200, {"ok": True})

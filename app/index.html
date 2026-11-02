@@ -360,6 +360,9 @@ img.emo{display:block;max-width:min(300px,100%);max-height:380px;width:auto;marg
 .msg:hover .mk{color:var(--ink3)}
 .mk:hover{background:var(--chip);color:var(--acc)!important}
 .msg.marked .bub{border-color:var(--acc);box-shadow:0 0 0 1px var(--acc) inset}
+.msg.flash .bub{animation:msgflash 2.6s ease-out}
+@keyframes msgflash{0%,45%{box-shadow:0 0 0 3px var(--acc)}100%{box-shadow:0 0 0 0 transparent}}
+@media (prefers-reduced-motion:reduce){.msg.flash .bub{animation:none;box-shadow:0 0 0 3px var(--acc)}}
 .msg.marked .mk{color:var(--acc)}
 .msg .who{padding-right:30px}
 .msg.u .who{padding-right:0;padding-left:30px}
@@ -1808,6 +1811,7 @@ function drawBot(tab) {
       ${peek ? `<a class="tab" href="#/b/${b.id}/lore" data-rep ${tab === 'lore' ? 'aria-current="page"' : ''}>로어북</a>
       <a class="tab" href="#/b/${b.id}/assets" data-rep ${tab === 'assets' ? 'aria-current="page"' : ''}>에셋</a>` : ''}
       <a class="tab" href="#/b/${b.id}/memo" data-rep ${tab === 'memo' ? 'aria-current="page"' : ''}>메모</a>
+      ${item ? '' : `<a class="tab" href="#/b/${b.id}/pics" data-rep ${tab === 'pics' ? 'aria-current="page"' : ''}>그림<span class="c">${b.images.length + b.scene_pics.length}</span></a>`}
     </nav>
     <div class="cols"><div id="tabBody" style="min-width:0"></div><aside id="aside"></aside></div>
   </div>`;
@@ -1834,7 +1838,7 @@ function drawBot(tab) {
     try { await api('DELETE', `/api/bots/${b.id}`); B = null; await loadState(); location.hash = item ? '#/shelf' : '#/'; toast('지웠어요'); } catch (e) { fail(e); }
   };
   drawAside();
-  ({intro: tabIntro, chats: tabChats, files: tabFiles, lore: () => tabPeek('lore'), assets: () => tabPeek('assets'), memo: tabMemo}[tab] || tabIntro)();
+  ({intro: tabIntro, chats: tabChats, files: tabFiles, lore: () => tabPeek('lore'), assets: () => tabPeek('assets'), memo: tabMemo, pics: item ? tabIntro : tabPics}[tab] || tabIntro)();
 }
 // ---- 봇 태그: 봇 페이지 상태 아래 줄 (누르면 서재에서 그 태그로 거름, + 태그로 넣기 — 다른 봇 태그·카드 태그를 추천) ----
 let allTags = [];  // 서재에 있는 태그 (넣을 때 추천)
@@ -2784,6 +2788,118 @@ function tabMemo() {
   $('#memo').addEventListener('blur', () => save.now());
 }
 
+// 그림 탭: 채팅하면서 만든 그림을 촤라락. 그림마다 어느 채팅 · 몇 번째 메시지에서 나왔는지 이어 두면 바로 그 자리로 감.
+// 채팅에서 표시한 장면에 붙인 그림도 같이 보임 (그건 채팅 화면에서 고침)
+let picFilter = '';  // '' = 전부, 'none' = 안 이은 그림, 숫자 = 그 채팅
+function tabPics() {
+  const el = $('#tabBody'), b = B;
+  let upChat = '';  // 올릴 때 이을 채팅
+  const chat = id => b.chats.find(c => c.id === id);
+  const where = i => { const c = chat(i.chat_id); return c ? `${c.title}${i.idx != null ? ` #${i.idx + 1}` : ''}` : ''; };
+  const all = () => [...b.images, ...b.scene_pics.map(m => ({...m, scene: true}))].sort((x, y) => (y.created || '').localeCompare(x.created || ''));
+  const shown = () => all().filter(i => !picFilter || (picFilter === 'none' ? !chat(i.chat_id) : i.chat_id === +picFilter));
+  const took = items => { b.images = items; draw(); };
+  const draw = () => {
+    const list = all(), by = new Map();
+    list.forEach(i => chat(i.chat_id) && by.set(i.chat_id, (by.get(i.chat_id) || 0) + 1));
+    if (picFilter && picFilter !== 'none' && !by.has(+picFilter)) picFilter = '';
+    const loose = list.filter(i => !chat(i.chat_id)).length, sh = shown(), cnt = $('.tabs a[href$="/pics"] .c');
+    if (cnt) cnt.textContent = list.length;
+    el.innerHTML = `<div class="toolbar" style="margin-bottom:14px">
+        ${list.length ? `<select class="inp" id="gpF" style="width:auto;max-width:100%;padding:7px 10px" aria-label="거르기"><option value="">그림 전부 (${list.length})</option>
+          ${b.chats.filter(c => by.has(c.id)).map(c => `<option value="${c.id}"${+picFilter === c.id ? ' selected' : ''}>${h(c.title)} (${by.get(c.id)})</option>`).join('')}
+          ${loose ? `<option value="none"${picFilter === 'none' ? ' selected' : ''}>채팅 안 이은 그림 (${loose})</option>` : ''}</select>` : ''}
+        <span style="flex:1"></span>
+        ${b.chats.length ? `<label class="row" style="gap:6px;font-size:13px;color:var(--ink2)">올릴 그림을 이을 채팅<select class="inp" id="gpUp" style="width:auto;max-width:220px;padding:7px 10px">
+          <option value="">이을 채팅 없음</option>${b.chats.map(c => `<option value="${c.id}"${+upChat === c.id ? ' selected' : ''}>${h(c.title)}</option>`).join('')}</select></label>` : ''}
+        <button class="btn sm pri" id="gpAdd">${ic('plus', 15)}그림 올리기</button></div>
+      <div class="pgal">${sh.map((i, k) => `<button type="button" class="pgi" data-k="${k}" title="${h(i.memo || '')}"><img src="/m/${h(i.image)}" alt="" loading="lazy">
+          ${i.scene ? `<span class="tag">★ 장면</span>` : ''}${where(i) || i.memo ? `<span class="mm">${h(where(i) || i.memo)}</span>` : ''}</button>`).join('')}</div>
+      ${list.length ? '<p class="meta" style="margin:12px 0 0">그림을 이 칸에 끌어 놓거나 붙여넣어도(Ctrl+V) 올라가요. 그림을 누르면 크게 보고, 이은 채팅으로 바로 갈 수 있어요.</p>'
+        : `<div class="empty" style="padding:40px 20px"><h3>아직 그림이 없어요</h3><p>채팅하면서 뽑은 그림을 모아 두세요. 어느 채팅 · 몇 번째 메시지에서 나온 그림인지 이어 두면 누르면 그 자리로 가요.<br>그림을 여기로 끌어 놓거나 붙여넣어도 돼요.</p></div>`}`;
+    if ($('#gpF', el)) $('#gpF', el).onchange = e => { picFilter = e.target.value; draw(); };
+    if ($('#gpUp', el)) $('#gpUp', el).onchange = e => { upChat = e.target.value; };
+    $('#gpAdd', el).onclick = async () => { const fs = await pick('image/*', true); if (fs.length) add(fs); };
+    $$('.pgi', el).forEach(t => t.onclick = () => picViewer(sh, +t.dataset.k, took));
+  };
+  const add = async fs => {
+    fs = fs.filter(f => /^image\//.test(f.type));
+    if (!fs.length) return toast('그림 파일이 아니에요', true);
+    let n = 0, items = null;
+    for (const f of fs) {
+      toast(fs.length > 1 ? `올리는 중 ${n + 1}/${fs.length}` : '올리는 중…');
+      try { items = (await api('POST', `/api/bots/${b.id}/images`, {image: await imgData(f), chat_id: +upChat || null})).images; n++; }
+      catch (e) { fail(new Error(`${f.name || '그림'}: ${e.message}`)); }
+    }
+    if (n) { toast(`그림 ${n}장을 올렸어요`); took(items); }
+  };
+  el.addEventListener('dragover', e => { e.preventDefault(); el.classList.add('pgover'); });
+  el.addEventListener('dragleave', e => { if (!el.contains(e.relatedTarget)) el.classList.remove('pgover'); });
+  el.addEventListener('drop', e => { e.preventDefault(); el.classList.remove('pgover'); add([...e.dataTransfer.files]); });
+  const paste = e => {
+    if (!document.body.contains(el) || curTab() !== 'pics') return document.removeEventListener('paste', paste);  // 다른 화면으로 가면 그만
+    if (document.querySelector('.dim') || /INPUT|TEXTAREA/.test((e.target || {}).tagName || '')) return;
+    const fs = [...e.clipboardData.items].filter(i => i.type.startsWith('image/')).map(i => i.getAsFile());
+    if (fs.length) { e.preventDefault(); add(fs); }
+  };
+  document.addEventListener('paste', paste);
+  draw();
+}
+// 봇 그림 크게 보기: 넘기기 · 메모 · 어느 채팅 몇 번째 메시지 · 그 채팅 열기 · 표지로 · 내려받기 · 지우기
+function picViewer(list, at, onChange) {
+  const b = B;
+  const m = modal(`<header><h2>그림</h2><span id="pvN"></span>${xBtn}</header><div class="bd" id="pvBd"></div>
+    <footer><button class="btn ghost danger" id="pvDel">${ic('trash', 16)}지우기</button><span class="note"></span>
+      <a class="btn" id="pvDl" download>${ic('dl', 16)}내려받기</a><button class="btn" id="pvCover">${ic('img', 16)}표지로 쓰기</button>
+      <a class="btn pri" id="pvGo">${ic('chat', 16)}채팅 열기</a></footer>`);
+  const draw = () => {
+    const i = list[at], c = b.chats.find(y => y.id === i.chat_id);
+    $('#pvN', m).textContent = `${at + 1} / ${list.length}`;
+    $('#pvBd', m).innerHTML = `<div class="gview">${list.length > 1 ? `<button class="ib gnav" data-d="-1" aria-label="앞 그림">${ic('back', 22)}</button>` : ''}
+        <img src="/m/${h(i.image)}" alt="" id="pvImg">${list.length > 1 ? `<button class="ib gnav nx" data-d="1" aria-label="다음 그림">${ic('back', 22)}</button>` : ''}</div>
+      ${i.scene ? `<p style="margin:14px 0 0"><b>★ ${h(c ? c.title : '')} #${i.idx + 1}</b> 장면에 붙인 그림이에요.</p>
+        ${i.memo ? `<div class="memo-pre" style="margin-top:8px;max-height:none;-webkit-mask-image:none">${h(i.memo)}</div>` : ''}
+        <p class="meta" style="margin:8px 0 0">메모 · 그림은 채팅 화면의 그 장면에서 고쳐요.</p>`
+      : `<div class="row" style="gap:12px;align-items:flex-start;margin-top:14px">
+        <label class="field" style="flex:2 1 240px">메모<textarea class="inp" id="pvMemo" style="min-height:64px" maxlength="2000" placeholder="어떤 그림인지 (선택)">${h(i.memo || '')}</textarea></label>
+        <div style="flex:1 1 200px;display:flex;flex-direction:column;gap:10px">
+          <label class="field" style="margin:0">어느 채팅<select class="inp" id="pvChat"><option value="">이을 채팅 없음</option>
+            ${b.chats.map(y => `<option value="${y.id}"${y.id === i.chat_id ? ' selected' : ''}>${h(y.title)}</option>`).join('')}</select></label>
+          <label class="field" style="margin:0">몇 번째 메시지<input class="inp" id="pvIdx" type="number" min="1" ${c ? `max="${c.count}"` : 'disabled'} placeholder="${c ? `#1 ~ #${c.count} (비우면 처음부터)` : '채팅을 먼저 골라요'}" value="${c && i.idx != null ? i.idx + 1 : ''}"></label></div></div>`}`;
+    $('#pvDl', m).href = `/m/${i.image}`;
+    $('#pvDel', m).hidden = !!i.scene;
+    const go = $('#pvGo', m);
+    go.hidden = !c;
+    if (c) { go.href = `#/c/${c.id}${i.idx != null ? '/' + (i.idx + 1) : ''}`; go.title = `${c.title}${i.idx != null ? ` #${i.idx + 1}` : ''}`; go.onclick = () => m.close(); }
+    $('#pvImg', m).onclick = () => lightbox(`/m/${i.image}`);
+    $$('.gnav', m).forEach(x => x.onclick = () => { at = (at + +x.dataset.d + list.length) % list.length; draw(); });
+    if (i.scene) return;
+    const put = async vals => {
+      try { const d = (await api('PUT', `/api/bimages/${i.id}`, vals)).images; Object.assign(i, d.find(y => y.id === i.id) || {}); onChange(d); draw(); } catch (e) { fail(e); }
+    };
+    $('#pvMemo', m).onchange = e => put({memo: e.target.value});
+    $('#pvChat', m).onchange = e => put({chat_id: +e.target.value || null, idx: null});
+    $('#pvIdx', m).onchange = e => put({idx: e.target.value ? +e.target.value - 1 : null});
+  };
+  const key = e => { if (/TEXTAREA|SELECT|INPUT/.test(e.target.tagName) || list.length < 2) return;
+    if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') { at = (at + (e.key === 'ArrowLeft' ? -1 : 1) + list.length) % list.length; draw(); } };
+  document.addEventListener('keydown', key);
+  m.onclose = () => document.removeEventListener('keydown', key);
+  $('#pvDel', m).onclick = async () => {
+    if (!await confirmBox('그림 지우기', '이 그림을 지울까요? 되돌릴 수 없어요.')) return;
+    try {
+      const d = (await api('DELETE', `/api/bimages/${list[at].id}`)).images;
+      list.splice(at, 1); onChange(d);
+      if (!list.length) return m.close();
+      at = Math.min(at, list.length - 1); draw();
+    } catch (e) { fail(e); }
+  };
+  $('#pvCover', m).onclick = async () => {
+    try { await api('PUT', `/api/bots/${b.id}`, {cover: await blobData(list[at].image)}); m.close(); toast('표지를 바꿨어요'); viewBot(b.id, 'pics'); } catch (e) { fail(e); }
+  };
+  draw();
+}
+
 // ---- 채팅 파일 읽기 ----
 function parseChats(text, fname, botName) {
   const base = fname.replace(/\.[^.]+$/, '');
@@ -3070,7 +3186,7 @@ function richMsg(text) {
   return out;
 }
 
-async function viewChat(id) {
+async function viewChat(id, jump = 0) {  // jump: 보여 줄 메시지 번호 (#1부터)
   const view = $('#view');
   C = await api('GET', `/api/chats/${id}`);
   const [siblings, assets] = await Promise.all([api('GET', `/api/chats?bot=${C.bot_id}`).then(d => d.chats),
@@ -3145,6 +3261,11 @@ async function viewChat(id) {
     frag.append(d);
   }
   box.append(frag);
+  const to = jump && box.querySelector(`.msg[data-idx="${jump - 1}"]`);
+  if (to) {  // 위 말풍선들이 그려지며 높이가 바뀌니 한 번 더 맞춤
+    setTimeout(() => to.scrollIntoView({block: 'center'}));
+    setTimeout(() => { to.scrollIntoView({block: 'center'}); to.classList.add('flash'); }, 300);
+  }
   box.addEventListener('click', e => { const im = e.target.closest('img.emo'); if (im) lightbox(im.src); });
   const counts = () => { $('#nMk').textContent = marks.size; $('#nPic').textContent = [...marks.values()].filter(m => m.image).length; };
   const apply = () => {
@@ -4476,7 +4597,7 @@ async function route() {
     if (r[0] === 'all') return await viewHome();
     if (r[0] === 'f' && r[1]) return await viewHome(+r[1]);
     if (r[0] === 'b' && r[1]) return await viewBot(+r[1], r[2]);
-    if (r[0] === 'c' && r[1]) return await viewChat(+r[1]);
+    if (r[0] === 'c' && r[1]) return await viewChat(+r[1], +r[2] || 0);
     if (r[0] === 'chats') return await viewChats();
     if (r[0] === 'shelf') return await viewShelf(r[1]);
     if (r[0] === 'styles') return await viewStyles();
