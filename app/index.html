@@ -583,6 +583,17 @@ img.emo{display:block;max-width:min(300px,100%);max-height:380px;width:auto;marg
 .pimo button[aria-pressed=true]{border-color:var(--acc);color:var(--ink)}
 .pimo img{width:74px;height:74px;object-fit:cover;border-radius:7px}
 .pimo span{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pgal{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px}
+.pgi{position:relative;padding:0;border:1px solid var(--line);border-radius:12px;overflow:hidden;background:var(--sunk);aspect-ratio:3/4;cursor:zoom-in}
+.pgi img{width:100%;height:100%;object-fit:cover;display:block;transition:transform .2s}
+.pgi:hover img{transform:scale(1.03)}
+.pgi .tag{position:absolute;left:6px;top:6px;padding:2px 8px;border-radius:999px;font-size:11.5px;font-weight:600;color:#fff;background:rgba(10,10,12,.72)}
+.pgi .mm{position:absolute;left:0;right:0;bottom:0;padding:18px 8px 6px;background:linear-gradient(transparent,rgba(0,0,0,.72));color:#fff;font-size:12px;text-align:left;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pgover{outline:2px dashed var(--acc);outline-offset:6px;border-radius:12px}
+.gview{position:relative;display:flex;align-items:center;justify-content:center;background:var(--sunk);border-radius:14px;min-height:200px}
+.gview img{max-width:100%;max-height:60vh;display:block;object-fit:contain;cursor:zoom-in}
+.gview .gnav{position:absolute;left:8px;top:50%;transform:translateY(-50%);background:rgba(10,10,12,.6);color:#fff}
+.gview .gnav.nx{left:auto;right:8px;transform:translateY(-50%) scaleX(-1)}
 .found{display:flex;flex-direction:column;gap:8px}
 .found label{display:flex;align-items:center;gap:12px;padding:10px 12px;border-radius:12px;border:1px solid var(--line2);background:var(--card2)}
 .found input[type=checkbox]{width:18px;height:18px;accent-color:var(--acc)}
@@ -1910,9 +1921,10 @@ function drawAside() {
 // 탭(지금 버전의 카드+모듈 전부)과 파일 하나 들여다보기 창이 같은 그리기를 씀
 const PEEK_KINDS = ['card', 'module'];
 const peekFiles = v => B.files.filter(f => f.version_id === (v ? v.id : null) && PEEK_KINDS.includes(f.kind)).sort((a, b) => (a.kind === 'card' ? 0 : 1) - (b.kind === 'card' ? 0 : 1));
+const fbase = f => f.base || `/api/files/${f.id}`;  // 페르소나 모듈은 base로 따로
 async function loreView(el, files) {
   el.innerHTML = '<p class="hint">파일에서 로어북을 읽는 중…</p>';
-  const res = await Promise.all(files.map(f => api('GET', `/api/files/${f.id}/lore`).then(d => ({f, d}), e => ({f, err: e.message}))));
+  const res = await Promise.all(files.map(f => api('GET', `${fbase(f)}/lore`).then(d => ({f, d}), e => ({f, err: e.message}))));
   const groups = [];
   for (const r of res) {
     if (r.err) { groups.push({title: r.f.name, err: r.err, entries: []}); continue; }
@@ -1965,14 +1977,14 @@ async function loreView(el, files) {
 }
 async function assetView(el, files) {
   el.innerHTML = '<p class="hint">파일에서 에셋 목록을 읽는 중…</p>';
-  const res = await Promise.all(files.map(f => api('GET', `/api/files/${f.id}/assets`).then(d => ({f, d}), e => ({f, err: e.message}))));
+  const res = await Promise.all(files.map(f => api('GET', `${fbase(f)}/assets`).then(d => ({f, d}), e => ({f, err: e.message}))));
   const groups = [], all = [];
   for (const r of res) {
     if (r.err) continue;
     for (const s of r.d.sources) {
       const g = {n: groups.length, title: s.label + (files.length > 1 && s.kind === 'c' ? '' : ''), count: 0};
       for (const a of s.assets) if (a.here || a.url) {
-        all.push({...a, g: g.n, src: a.here ? `/api/files/${r.f.id}/${s.kind === 'm' ? 'masset' : 'asset'}/${a.i}` : a.url}); g.count++;
+        all.push({...a, g: g.n, src: a.here ? `${fbase(r.f)}/${s.kind === 'm' ? 'masset' : 'asset'}/${a.i}` : a.url}); g.count++;
       }
       if (g.count) groups.push(g);
     }
@@ -3413,14 +3425,15 @@ async function viewPersonas() {
 function personaImgDialog(x, g, file) {
   return new Promise(res => {
     let img = null, drop = false;
-    const others = g.versions.filter(v => v.id !== x.id && v.image);
+    const others = [...g.versions.filter(v => v.id !== x.id && v.image).map(v => ({image: v.image, label: verName(v, g)})),
+      ...(g.images || []).map(i => ({image: i.image, label: i.memo || '갤러리'}))];  // 다른 버전 그림 + 갤러리
     const m = modal(`<header><h2>그림 바꾸기</h2><span>${h(verName(x, g))}</span>${xBtn}</header>
       <div class="bd">
         <div class="pimz" id="piZone" tabindex="0"><div id="piView"></div><span class="hint" style="margin:0">그림을 여기로 끌어 놓거나 붙여넣어도 돼요 (Ctrl+V)</span></div>
         <div class="row"><button type="button" class="btn sm pri" id="piPick">${ic('img', 15)}그림 고르기</button>
           <button type="button" class="btn sm ghost" id="piBig">${ic('search', 15)}크게 보기</button>
           <button type="button" class="btn sm ghost danger" id="piDrop">${ic('trash', 15)}빼기</button></div>
-        ${others.length ? `<div class="field">다른 버전 그림 쓰기<div class="pimo">${others.map(v => `<button type="button" data-v="${v.id}" aria-pressed="false"><img src="/m/${h(v.image)}" alt="" loading="lazy"><span>${h(verName(v, g))}</span></button>`).join('')}</div></div>` : ''}
+        ${others.length ? `<div class="field">다른 버전 · 갤러리 그림 쓰기<div class="pimo">${others.map((v, k) => `<button type="button" data-k="${k}" aria-pressed="false"><img src="/m/${h(v.image)}" alt="" loading="lazy"><span>${h(v.label)}</span></button>`).join('')}</div></div>` : ''}
       </div>
       <footer><span class="note"></span><button class="btn" data-close>취소</button><button class="btn pri" data-ok disabled>저장</button></footer>`, 'narrow');
     m.onclose = () => res(null);
@@ -3446,7 +3459,7 @@ function personaImgDialog(x, g, file) {
     $('#piBig', m).onclick = () => lightbox(cur());
     $('#piDrop', m).onclick = () => { img = null; drop = true; $$('.pimo button', m).forEach(b => b.setAttribute('aria-pressed', false)); draw(); };
     $$('.pimo button', m).forEach(b => b.onclick = async () => {
-      const v = others.find(o => o.id === +b.dataset.v);
+      const v = others[+b.dataset.k];
       try { await set(await (await fetch(`/m/${v.image}`)).blob(), b); } catch (e) { fail(e); }
     });
     if (file) set(file);
@@ -3482,6 +3495,96 @@ function personaCopyDialog(x, g) {
     $('#pcLabel', m).onkeydown = e => { if (e.key === 'Enter' && !e.isComposing) ok(); };
   });
 }
+// 페르소나 갤러리: 폴더(사람)마다 마음대로 올리는 그림. 버전 전용 또는 폴더 공통(persona_id null)
+function galleryView(el, g, x, after) {
+  let scope = ss.get('bs-pgal') === 'all' ? 'all' : 'mine', common = false;
+  const vname = id => { const v = g.versions.find(v => v.id === id); return v ? verName(v, g) : '공통'; };
+  const shown = () => scope === 'all' ? g.images : g.images.filter(i => !i.persona_id || i.persona_id === x.id);
+  const draw = () => {
+    const list = shown(), mine = g.images.filter(i => !i.persona_id || i.persona_id === x.id).length;
+    const cnt = $('.itabs [data-sub=gallery] .meta');
+    if (cnt) cnt.textContent = mine || '';
+    el.innerHTML = `<div class="toolbar" style="margin-bottom:14px">
+        <div class="seg" id="glScope"><button class="pill" data-s="mine" aria-pressed="${scope === 'mine'}">이 버전 + 공통<span class="c">${mine}</span></button>
+          <button class="pill" data-s="all" aria-pressed="${scope === 'all'}">폴더 전체<span class="c">${g.images.length}</span></button></div>
+        <label class="row" style="gap:6px;margin-left:auto;font-size:13px;color:var(--ink2)" title="켜면 모든 버전에서 보여요"><input type="checkbox" id="glCommon"${common ? ' checked' : ''}>폴더 공통으로 올리기</label>
+        <button class="btn sm pri" id="glAdd">${ic('plus', 15)}그림 올리기</button></div>
+      <div class="pgal" id="glGrid">${list.map(i => `<button type="button" class="pgi" data-i="${i.id}" title="${h(i.memo || '')}"><img src="/m/${h(i.image)}" alt="" loading="lazy">
+          ${!i.persona_id || i.persona_id !== x.id ? `<span class="tag">${h(vname(i.persona_id))}</span>` : ''}${i.memo ? `<span class="mm">${h(i.memo)}</span>` : ''}</button>`).join('')}</div>
+      ${list.length ? '<p class="meta" style="margin:12px 0 0">그림을 이 칸에 끌어 놓거나 붙여넣어도(Ctrl+V) 올라가요.</p>'
+        : `<div class="empty" style="padding:40px 20px"><h3>아직 그림이 없어요</h3><p>이 페르소나의 그림을 마음대로 모아 두세요. 그림을 여기로 끌어 놓거나 붙여넣어도 돼요.</p></div>`}`;
+    $$('#glScope .pill', el).forEach(b => b.onclick = () => { scope = b.dataset.s; ss.set('bs-pgal', scope); draw(); });
+    $('#glCommon', el).onchange = e => { common = e.target.checked; };
+    $('#glAdd', el).onclick = async () => { const fs = await pick('image/*', true); if (fs.length) add(fs); };
+    $$('.pgi', el).forEach(b => b.onclick = () => { const l = shown(); galleryViewer(g, x, l, l.findIndex(i => i.id === +b.dataset.i), d => { g.images = d; draw(); }, after); });
+  };
+  const add = async fs => {
+    fs = fs.filter(f => /^image\//.test(f.type));
+    if (!fs.length) return toast('그림 파일이 아니에요', true);
+    let n = 0;
+    for (const f of fs) {
+      toast(fs.length > 1 ? `올리는 중 ${n + 1}/${fs.length}` : '올리는 중…');
+      try { g.images = (await api('POST', `/api/pgroups/${g.id}/images`, {image: await imgData(f), persona_id: common ? null : x.id})).images; n++; }
+      catch (e) { fail(new Error(`${f.name || '그림'}: ${e.message}`)); }
+    }
+    if (n) { toast(`그림 ${n}장을 올렸어요`); draw(); }
+  };
+  el.addEventListener('dragover', e => { e.preventDefault(); el.classList.add('pgover'); });
+  el.addEventListener('dragleave', e => { if (!el.contains(e.relatedTarget)) el.classList.remove('pgover'); });
+  el.addEventListener('drop', e => { e.preventDefault(); el.classList.remove('pgover'); add([...e.dataTransfer.files]); });
+  const paste = e => {
+    if (!document.body.contains(el)) return document.removeEventListener('paste', paste);  // 다른 화면으로 가면 그만
+    if (document.querySelector('.dim') || /INPUT|TEXTAREA/.test((e.target || {}).tagName || '')) return;
+    const fs = [...e.clipboardData.items].filter(i => i.type.startsWith('image/')).map(i => i.getAsFile());
+    if (fs.length) { e.preventDefault(); add(fs); }
+  };
+  document.addEventListener('paste', paste);
+  draw();
+}
+// 갤러리 그림 크게 보기: 넘기기 · 메모 · 어느 버전 것인지 · 이 버전 그림으로 쓰기 · 내려받기 · 지우기
+function galleryViewer(g, x, list, at, onChange, after) {
+  const m = modal(`<header><h2>갤러리</h2><span id="gvN"></span>${xBtn}</header><div class="bd" id="gvBd"></div>
+    <footer><button class="btn ghost danger" id="gvDel">${ic('trash', 16)}지우기</button><span class="note"></span>
+      <a class="btn" id="gvDl" download>${ic('dl', 16)}내려받기</a><button class="btn pri" id="gvCover">${ic('img', 16)}이 버전 그림으로</button></footer>`);
+  const draw = () => {
+    const i = list[at];
+    $('#gvN', m).textContent = `${at + 1} / ${list.length}`;
+    $('#gvBd', m).innerHTML = `<div class="gview">${list.length > 1 ? `<button class="ib gnav" data-d="-1" aria-label="앞 그림">${ic('back', 22)}</button>` : ''}
+        <img src="/m/${h(i.image)}" alt="" id="gvImg">${list.length > 1 ? `<button class="ib gnav nx" data-d="1" aria-label="다음 그림">${ic('back', 22)}</button>` : ''}</div>
+      <div class="row" style="gap:12px;align-items:flex-start;margin-top:14px">
+        <label class="field" style="flex:2 1 240px">메모<textarea class="inp" id="gvMemo" style="min-height:64px" maxlength="2000" placeholder="어떤 그림인지 (선택)">${h(i.memo || '')}</textarea></label>
+        <label class="field" style="flex:1 1 160px">어느 버전<select class="inp" id="gvVer"><option value="">폴더 공통</option>
+          ${g.versions.map(v => `<option value="${v.id}"${v.id === i.persona_id ? ' selected' : ''}>${h(verName(v, g))}</option>`).join('')}</select></label></div>`;
+    $('#gvDl', m).href = `/m/${i.image}`;
+    $('#gvCover', m).innerHTML = `${ic('img', 16)}'${h(verName(x, g))}' 그림으로`;
+    $('#gvImg', m).onclick = () => lightbox(`/m/${i.image}`);
+    $$('.gnav', m).forEach(b => b.onclick = () => { at = (at + +b.dataset.d + list.length) % list.length; draw(); });
+    const put = async vals => { try { const d = (await api('PUT', `/api/pimages/${i.id}`, vals)).images; Object.assign(i, d.find(y => y.id === i.id) || {}); onChange(d); } catch (e) { fail(e); } };
+    $('#gvMemo', m).onchange = e => put({memo: e.target.value});
+    $('#gvVer', m).onchange = e => put({persona_id: +e.target.value || null});
+  };
+  const key = e => { if (e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT' || list.length < 2) return;
+    if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') { at = (at + (e.key === 'ArrowLeft' ? -1 : 1) + list.length) % list.length; draw(); } };
+  document.addEventListener('keydown', key);
+  m.onclose = () => document.removeEventListener('keydown', key);
+  $('#gvDel', m).onclick = async () => {
+    if (!await confirmBox('그림 지우기', '이 그림을 갤러리에서 지울까요? 되돌릴 수 없어요.')) return;
+    try {
+      const d = (await api('DELETE', `/api/pimages/${list[at].id}`)).images;
+      list.splice(at, 1); onChange(d);
+      if (!list.length) return m.close();
+      at = Math.min(at, list.length - 1); draw();
+    } catch (e) { fail(e); }
+  };
+  $('#gvCover', m).onclick = async () => {
+    try {
+      const img = await imgData(await (await fetch(`/m/${list[at].image}`)).blob());
+      await api('PUT', `/api/personas/${x.id}`, {image: img});
+      m.close(); toast('그림을 바꿨어요'); after();
+    } catch (e) { fail(e); }
+  };
+  draw();
+}
 let GX = null;  // 열어 둔 페르소나 폴더
 async function viewPersona(gid, vid) {
   const fresh = !GX || GX.id !== gid;
@@ -3491,6 +3594,9 @@ async function viewPersona(gid, vid) {
 }
 function drawPersona(vid) {
   const g = GX, x = g.versions.find(v => v.id === vid) || g.versions[0];
+  let sub = location.hash.split('/')[4] || 'main';  // 버전 안 하위 탭: main(프롬프트) · lore · assets · gallery
+  if ((sub === 'lore' || sub === 'assets') && !x.module || !['main', 'lore', 'assets', 'gallery'].includes(sub)) sub = 'main';
+  const subUrl = (v, t = sub) => `#/p/${g.id}/${v.id}${t === 'main' ? '' : '/' + t}`;
   const nChats = g.versions.reduce((n, v) => n + v.chats.length, 0), nBots = g.versions.reduce((n, v) => n + v.bots.length, 0);
   $('#view').innerHTML = `<div class="wrap">
     <button class="backbtn" id="pxBack">${ic('back', 16)}뒤로</button>
@@ -3508,7 +3614,7 @@ function drawPersona(vid) {
         </div>
       </div>
     </section>
-    <nav class="tabs">${g.versions.map((v, i) => `<a class="tab" href="#/p/${g.id}/${v.id}" data-rep ${v.id === x.id ? 'aria-current="page"' : ''}>${i === 0 && g.versions.length > 1 ? `${ic('star', 13)}` : ''}${h(verName(v, g))}<span class="c">${v.chats.length || ''}</span></a>`).join('')}</nav>
+    <nav class="tabs">${g.versions.map((v, i) => `<a class="tab" href="${subUrl(v)}" data-rep ${v.id === x.id ? 'aria-current="page"' : ''}>${i === 0 && g.versions.length > 1 ? `${ic('star', 13)}` : ''}${h(verName(v, g))}<span class="c">${v.chats.length || ''}</span></a>`).join('')}</nav>
     <div class="row" style="margin:-8px 0 20px">
       <span class="meta" style="margin-right:auto">리스 이름 <b>${h(x.name)}</b>${x.label ? ` · 버전 <b>${h(x.label)}</b>` : ''} · ${day(x.created)}에 넣음</span>
       <button class="btn sm pri" id="pxCopy"${x.prompt ? '' : ' disabled'}>${ic('copy', 16)}프롬프트 복사</button>
@@ -3518,7 +3624,13 @@ function drawPersona(vid) {
       ${g.versions.length > 1 && x.id !== g.versions[0].id ? `<button class="btn sm ghost" id="pxFirst" title="맨 앞 버전 = 폴더 표지">${ic('star', 16)}대표로</button>` : ''}
       <button class="btn sm ghost danger" id="pxDel">${ic('trash', 16)}${g.versions.length > 1 ? '이 버전 지우기' : '지우기'}</button>
     </div>
-    <div class="cols"><div style="min-width:0;display:flex;flex-direction:column;gap:18px">
+    <div class="itabs" role="tablist" aria-label="이 버전">
+      <button role="tab" data-sub="main" aria-selected="${sub === 'main'}">프롬프트</button>
+      ${x.module ? `<button role="tab" data-sub="lore" aria-selected="${sub === 'lore'}">${ic('book', 14)}로어북</button>
+      <button role="tab" data-sub="assets" aria-selected="${sub === 'assets'}">${ic('img', 14)}에셋</button>` : ''}
+      <button role="tab" data-sub="gallery" aria-selected="${sub === 'gallery'}">${ic('img', 14)}갤러리<span class="meta">${g.images.filter(i => !i.persona_id || i.persona_id === x.id).length || ''}</span></button></div>
+    ${sub !== 'main' ? '<div id="pxSub"></div>' : ''}
+    <div class="cols"${sub === 'main' ? '' : ' hidden'}><div style="min-width:0;display:flex;flex-direction:column;gap:18px">
       <div class="box"><h3>프롬프트${x.prompt ? `<button class="ib" id="pxCp2" aria-label="프롬프트 복사" title="복사">${ic('copy', 16)}</button>` : ''}</h3>
         ${x.prompt ? `<pre class="sprm" style="font:14px/1.7 var(--body);max-height:480px">${h(x.prompt)}</pre>` : '<p class="hint">아직 프롬프트가 없어요. 고치기에서 넣어 주세요.</p>'}</div>
       <div class="box"><h3>${ic('chat', 16)}이 버전으로 한 채팅 로그 <span class="meta" style="font-weight:500">${x.chats.length}</span></h3>
@@ -3537,6 +3649,12 @@ function drawPersona(vid) {
     </aside></div>
   </div>`;
   const reload = async (to = x.id) => { GX = await api('GET', `/api/pgroups/${g.id}`); if (GX.versions.some(v => v.id === to)) drawPersona(to); else replaceHash(`#/p/${g.id}/${GX.versions[0].id}`); };
+  $$('.itabs [data-sub]').forEach(b => b.onclick = () => replaceHash(subUrl(x, b.dataset.sub)));
+  if (sub === 'gallery') galleryView($('#pxSub'), g, x, () => reload());
+  else if (sub !== 'main') {
+    const mf = {id: 0, name: x.module_name, kind: 'module', base: `/api/personas/${x.id}/module`};
+    (sub === 'lore' ? loreView : assetView)($('#pxSub'), [mf]);
+  }
   const moved = async d => {  // 고치다가 다른 폴더로 옮겼으면 그 폴더로
     if (d.group_id !== g.id) { await loadState(); location.hash = `#/p/${d.group_id}/${d.id}`; } else await reload(d.id);
   };

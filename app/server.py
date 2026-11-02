@@ -36,7 +36,9 @@ API (JSON):
   GET    /api/personas   POST /api/personas {group_id?, name, label, prompt, memo, image(data URL)}   GET|PUT|DELETE /api/personas/<id> (PUT drop_image, group_id)
   GET|PUT|DELETE /api/personas/<id>/module?name=   페르소나용 모듈(.risum) 하나 (PUT은 본문 그대로)
   POST   /api/personas/<id>/copy {label, group_id: 빼면 같은 폴더 · null이면 새 폴더}   버전 복제 (그림·모듈도 새 파일로)
+  GET    /api/personas/<id>/module/lore|assets   GET /api/personas/<id>/module/masset/<n>   페르소나 모듈 로어북 · 에셋 (봇 파일과 같은 모양)
   GET    /api/pgroups   GET|PUT|DELETE /api/pgroups/<id>   PUT {name, ptype, order: [버전 id…]}
+  POST   /api/pgroups/<id>/images {image(data URL), persona_id(null = 폴더 공통), memo}   PUT|DELETE /api/pimages/<id> {memo, persona_id}   갤러리
          페르소나 = 폴더(사람 하나) 안의 버전들. 버전 = 그림 한 장 + 프롬프트 + 메모. 봇의 기본 페르소나는 PUT /api/bots/<id> {persona_id, fill_chats}
   GET    /api/styles   GET|PUT|DELETE /api/styles/<id>   POST /api/styles {name, stype, prompt, negative, settings, images: [{data, meta}], folders, tags…}
   POST   /api/styles/<id>/images {images}   PUT|DELETE /api/style_images/<id> ({front: true} = 대표 그림)
@@ -187,6 +189,9 @@ CREATE TABLE IF NOT EXISTS personas (
   id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, image TEXT, prompt TEXT DEFAULT '', memo TEXT DEFAULT '',
   module TEXT, module_name TEXT, module_size INTEGER, created TEXT, updated TEXT, opened TEXT);
 CREATE TABLE IF NOT EXISTS pgroups (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, created TEXT, updated TEXT, opened TEXT);
+CREATE TABLE IF NOT EXISTS pimages (id INTEGER PRIMARY KEY AUTOINCREMENT, group_id INTEGER REFERENCES pgroups(id) ON DELETE CASCADE,
+  persona_id INTEGER, image TEXT NOT NULL, memo TEXT DEFAULT '', created TEXT);
+CREATE INDEX IF NOT EXISTS pimages_group ON pimages(group_id);
 CREATE TABLE IF NOT EXISTS ptypes (key TEXT PRIMARY KEY, name TEXT NOT NULL, color TEXT, sort INTEGER DEFAULT 0, builtin INTEGER DEFAULT 0);
 """
 DEFAULT_FOLDERS = [("운영 봇", "#F2B655"), ("자작 봇", "#5EC2B7"), ("받은 봇", "#B9A6F5"), ("해 볼 것", "#8FB8E8")]
@@ -489,6 +494,8 @@ def file_home(f):
 
 def fpath(token):
     """파일 토큰 → 디스크 경로 (옮기는 사이에는 예전 자리)."""
+    if token.startswith("pm:"):  # 페르소나 모듈 (persona_module_token)
+        return DATA / token[3:].split("?", 1)[0]
     r = db.q("SELECT path, moving FROM files WHERE file=?", (token,))
     if not r or not r[0]["path"]:
         return FILES / token
@@ -1150,7 +1157,18 @@ def pgroup_detail(gid):
         return None
     g = g[0]
     g["versions"] = [persona_detail(r["id"]) for r in db.q("SELECT id FROM personas WHERE group_id=? ORDER BY sort, id", (gid,))]
+    g["images"] = pimage_rows(gid)
     return g
+
+
+def persona_module_token(x):
+    """페르소나 모듈을 봇 파일처럼 들여다볼 때 쓰는 토큰 (바꿔 올리면 캐시가 안 섞이게 수정 시각을 붙임)."""
+    f = DATA / x["module"] if x["module"] else None
+    return f"pm:{x['module']}?{f.stat().st_mtime_ns}" if f and f.is_file() else None
+
+
+def pimage_rows(gid):
+    return db.q("SELECT id, persona_id, image, memo, created FROM pimages WHERE group_id=? ORDER BY id DESC", (gid,))
 
 
 def pgroup_ok(v):
@@ -1177,7 +1195,10 @@ def pgroup_next(gid):
 def pgroup_prune(gid):
     """버전이 하나도 안 남은 폴더는 지움."""
     if gid and not db.q("SELECT 1 FROM personas WHERE group_id=? LIMIT 1", (gid,)):
+        imgs = [r["image"] for r in db.q("SELECT image FROM pimages WHERE group_id=?", (gid,))]
+        db.x("DELETE FROM pimages WHERE group_id=?", (gid,))
         db.x("DELETE FROM pgroups WHERE id=?", (gid,))
+        drop_media(*imgs)
 
 
 def persona_vals(d):
@@ -1217,6 +1238,7 @@ def drop_persona(pid):
     drop_persona_module(pid)
     db.x("UPDATE chats SET persona_id=NULL WHERE persona_id=?", (pid,))
     db.x("UPDATE bots SET persona_id=NULL WHERE persona_id=?", (pid,))
+    db.x("UPDATE pimages SET persona_id=NULL WHERE persona_id=?", (pid,))
     db.x("DELETE FROM personas WHERE id=?", (pid,))
     drop_media(r[0]["image"])
     prune(DATA / persona_home(pid))
@@ -1418,6 +1440,14 @@ def export_zip(out):
                 z.write(DATA / x["module"], arc, compress_type=zipfile.ZIP_STORED)
                 mp["module"], mp["module_name"] = arc.rsplit("/", 1)[1], x["module_name"]
             manifest["personas"].append(mp)
+        for g in manifest["pgroups"]:  # 갤러리: 폴더 아래 '갤러리' (버전 전용이면 그 버전 id)
+            g["images"] = []
+            for r in db.q("SELECT persona_id, image, memo, created FROM pimages WHERE group_id=? ORDER BY id", (g["id"],)):
+                f = MEDIA / r["image"] if re.fullmatch(MEDIA_RE, r["image"] or "") else None
+                if g["id"] in gdirs and f and f.is_file():
+                    arc = slot(f"{gdirs[g['id']]}/갤러리", f"{len(g['images']) + 1:03d}.{r['image'].rsplit('.', 1)[1]}")
+                    z.write(f, arc, compress_type=zipfile.ZIP_STORED)
+                    g["images"].append({"file": arc[len(root) + 1:], "persona": r["persona_id"], "memo": r["memo"] or "", "created": r["created"]})
         text(f"{root}/읽어 주세요.txt", EXPORT_README)
         text(f"{root}/봇카이브.json", json.dumps(manifest, ensure_ascii=False, indent=1))
 
@@ -1604,6 +1634,16 @@ def _import_zip(z, job, made):
             pmap[mp["id"]] = pid
         out["personas"] += 1
     persona_of = lambda v: pmap.get(v) if isinstance(v, int) else None
+    for g in lst(m.get("pgroups")):
+        gid = gmap.get(g.get("id")) if isinstance(g, dict) else None
+        if gid not in made["pgroups"]:
+            continue
+        for im in lst(g.get("images")):
+            if isinstance(im, dict) and (name := media(txt(im.get("file"), 2000))):
+                pid = persona_of(im.get("persona"))
+                db.x("INSERT INTO pimages(group_id, persona_id, image, memo, created) VALUES (?,?,?,?,?)",
+                     (gid, pid if pid and db.q("SELECT 1 FROM personas WHERE id=? AND group_id=?", (pid, gid)) else None,
+                      name, txt(im.get("memo"), 2000), when(im.get("created"))))
 
     have = {(r["name"], r["creator"] or "", bool(r["itype"])) for r in db.q("SELECT name, creator, itype FROM bots")}
     new_bots = {}  # 이름 → 새 id (그림체 잇기용)
@@ -2580,6 +2620,21 @@ class Handler(BaseHTTPRequestHandler):
                 if params.get("open"):
                     db.x("UPDATE pgroups SET opened=? WHERE id=?", (now(), g["id"]))
                 return self.send(200, g)
+            if len(p) in (4, 5) and p[0] == "personas" and p[1].isdigit() and p[2] == "module" and p[3] in ("lore", "assets", "masset"):
+                x = db.q("SELECT module FROM personas WHERE id=?", (int(p[1]),))
+                tok = persona_module_token(x[0]) if x else None
+                if not tok:
+                    return self.send(404, {"error": "모듈이 없어요"})
+                try:
+                    if p[3] == "lore" and len(p) == 4:
+                        return self.send(200, file_lore(tok))
+                    if p[3] == "assets" and len(p) == 4:
+                        return self.send(200, file_assets(tok))
+                    if p[3] == "masset" and len(p) == 5 and p[4].isdigit():
+                        return self.send_mod_asset(tok, int(p[4]))
+                except (ValueError, json.JSONDecodeError, OSError, zipfile.BadZipFile) as e:
+                    return self.send(422, {"error": str(e) or "모듈을 읽지 못했어요"})
+                return self.send(404, {"error": "없음"})
             if len(p) in (2, 3) and p[0] == "personas" and p[1].isdigit() and p[2:] in ([], ["module"]):
                 x = persona_detail(int(p[1]))
                 if not x:
@@ -2664,6 +2719,16 @@ class Handler(BaseHTTPRequestHandler):
                 return
             if p == ["styles"]:
                 return self.send(200, style_detail(new_style(d)))
+            if len(p) == 3 and p[0] == "pgroups" and p[1].isdigit() and p[2] == "images":  # {image(data URL), persona_id(null = 폴더 공통), memo}
+                gid = int(p[1])
+                if not db.q("SELECT 1 FROM pgroups WHERE id=?", (gid,)):
+                    return self.send(404, {"error": "페르소나가 없어요"})
+                pid = d.get("persona_id")
+                pid = pid if isinstance(pid, int) and db.q("SELECT 1 FROM personas WHERE id=? AND group_id=?", (pid, gid)) else None
+                img = save_data_url(d.get("image"))
+                iid, _ = db.x("INSERT INTO pimages(group_id, persona_id, image, memo, created) VALUES (?,?,?,?,?)",
+                              (gid, pid, img, str(d.get("memo") or "").strip()[:2000], now()))
+                return self.send(200, {"ok": True, "id": iid, "images": pimage_rows(gid)})
             if len(p) == 3 and p[0] == "personas" and p[1].isdigit() and p[2] == "copy":  # {label, group_id: 없으면 같은 폴더, null이면 새 폴더}
                 old = db.q("SELECT label, group_id FROM personas WHERE id=?", (int(p[1]),))
                 if not old:
@@ -2959,8 +3024,21 @@ class Handler(BaseHTTPRequestHandler):
                 if "image" in vals:
                     drop_media(old[0]["image"])
                 if "group_id" in vals:
+                    db.x("UPDATE pimages SET group_id=? WHERE persona_id=?", (vals["group_id"], pid))
                     pgroup_prune(old[0]["group_id"])
                 return self.send(200, persona_detail(pid))
+            if p and len(p) == 2 and p[0] == "pimages" and p[1].isdigit():  # {memo, persona_id(null = 폴더 공통)}
+                r = db.q("SELECT group_id FROM pimages WHERE id=?", (int(p[1]),))
+                if not r:
+                    return self.send(404, {"error": "그림이 없어요"})
+                gid = r[0]["group_id"]
+                if "memo" in d:
+                    db.x("UPDATE pimages SET memo=? WHERE id=?", (str(d["memo"] or "").strip()[:2000], int(p[1])))
+                if "persona_id" in d:
+                    pid = d["persona_id"]
+                    pid = pid if isinstance(pid, int) and db.q("SELECT 1 FROM personas WHERE id=? AND group_id=?", (pid, gid)) else None
+                    db.x("UPDATE pimages SET persona_id=? WHERE id=?", (pid, int(p[1])))
+                return self.send(200, {"ok": True, "images": pimage_rows(gid)})
             if p and len(p) == 2 and p[0] == "pgroups" and p[1].isdigit():  # {name, order: [버전 id…]} (맨 앞 = 대표)
                 gid = int(p[1])
                 if not db.q("SELECT 1 FROM pgroups WHERE id=?", (gid,)):
@@ -3259,6 +3337,13 @@ class Handler(BaseHTTPRequestHandler):
                 gid = db.q("SELECT group_id FROM personas WHERE id=?", (pid,))[0]["group_id"]
                 drop_persona(pid)
                 return self.send(200, {"ok": True, "group": gid if pgroup_ok(gid) else None})
+            if p and len(p) == 2 and p[0] == "pimages" and p[1].isdigit():
+                r = db.q("SELECT group_id, image FROM pimages WHERE id=?", (int(p[1]),))
+                if not r:
+                    return self.send(404, {"error": "그림이 없어요"})
+                db.x("DELETE FROM pimages WHERE id=?", (int(p[1]),))
+                drop_media(r[0]["image"])
+                return self.send(200, {"ok": True, "images": pimage_rows(r[0]["group_id"])})
             if p and len(p) == 2 and p[0] == "pgroups" and p[1].isdigit():  # 폴더째: 버전 전부
                 gid = int(p[1])
                 if not db.q("SELECT 1 FROM pgroups WHERE id=?", (gid,)):

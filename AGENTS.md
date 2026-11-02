@@ -91,7 +91,7 @@ cd app; $env:DATA_DIR = "..\data"; python server.py   # 윈도우 PowerShell
   - `folders`: `scope`가 `bot`이면 서재 폴더, `item`이면 자료함 폴더, `style`이면 그림체 폴더예요. 봇·자료는 `bot_folders`, 그림체는 `style_folders`로 이어져요.
   - `statuses`, `itypes`, `stypes`: 이름표 표 (기본 몇 개 + 사용자가 더한 것). `stypes`는 그림체 분류
   - `styles`, `style_images`, `style_folders`, `bot_styles`: 그림체(프롬프트·설정 + 견본 그림), 그림체 폴더, 봇 ↔ 그림체(`role` official|mine)
-  - `pgroups` · `personas`: 페르소나 폴더(사람 하나)와 그 안의 버전(`group_id` · `label` · `sort`, 맨 앞이 대표). 버전 = 그림 한 장 + 프롬프트 + 메모, 모듈 하나는 `data/personas/<버전 id 4자리>/`. 마지막 버전을 지우면 폴더도 지워요. `pgroups.ptype`은 `ptypes` 이름표(기본 male 남캐 · female 여캐, '' = 분류 없음 — 지운 분류도 여기로). `chats.persona_id`는 그 로그의 페르소나 버전, `bots.persona_id`는 새 로그에 알아서 붙일 기본 페르소나 (NULL = 지정 안 함)
+  - `pgroups` · `personas`: 페르소나 폴더(사람 하나)와 그 안의 버전(`group_id` · `label` · `sort`, 맨 앞이 대표). 버전 = 그림 한 장 + 프롬프트 + 메모, 모듈 하나는 `data/personas/<버전 id 4자리>/`. 마지막 버전을 지우면 폴더도 지워요. `pimages`는 폴더 갤러리(`persona_id` NULL = 폴더 공통, 버전을 지우면 공통으로, 폴더를 지우면 같이 지움). 페르소나 모듈은 파일 토큰 `pm:<경로>?<수정 시각>`으로 봇 파일처럼 로어북 · 에셋을 읽어요(`fpath`). `pgroups.ptype`은 `ptypes` 이름표(기본 male 남캐 · female 여캐, '' = 분류 없음 — 지운 분류도 여기로). `chats.persona_id`는 그 로그의 페르소나 버전, `bots.persona_id`는 새 로그에 알아서 붙일 기본 페르소나 (NULL = 지정 안 함)
   - `settings`, `sessions`: 잠금 설정과 로그인
   - `shelves`: 예전 자료함 칸
 - 그림은 `data/media/`, 백업은 `data/backups/`.
