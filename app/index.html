@@ -552,6 +552,28 @@ img.emo{display:block;max-width:min(300px,100%);max-height:380px;width:auto;marg
 .colors button[aria-pressed=true]{border-color:var(--ink)}
 .prog{height:6px;border-radius:999px;background:var(--line);overflow:hidden}
 .prog i{display:block;height:100%;width:0;background:var(--acc);transition:width .2s}
+.sets{display:flex;flex-direction:column;gap:2px}
+.sets .legend{font-size:15px;margin:16px 0 4px}
+.sets .legend:first-child{margin-top:0}
+.setr{display:flex;align-items:center;gap:12px;width:100%;min-height:52px;padding:8px 12px;border:0;border-radius:12px;background:none;color:var(--ink);text-align:left;cursor:pointer}
+.setr:hover{background:var(--card2)}
+.setr>svg{flex:none;color:var(--ink3)}
+.setr .tx{display:flex;flex-direction:column;min-width:0}
+.setr b{font-weight:600}
+.setr small{font-size:12.5px;color:var(--mute)}
+.setr .v{margin-left:auto;flex:none;font-size:13px;color:var(--mute);text-align:right}
+.pchip{display:inline-flex;align-items:center;gap:7px;min-height:30px;padding:0 12px 0 4px;border-radius:999px;border:1px solid var(--line2);background:var(--card2);color:var(--ink2);font-size:13px;font-weight:600;cursor:pointer;max-width:100%}
+.pchip img,.pchip .pav{flex:none;width:22px;height:22px;border-radius:50%;object-fit:cover;display:grid;place-items:center;background:var(--sunk2);font-size:11px;color:var(--ink3)}
+.pchip span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pchip.none{padding-left:12px;color:var(--mute);font-weight:500;border-style:dashed}
+.pki .pav{flex:none;width:34px;height:34px;border-radius:50%;display:grid;place-items:center;background:var(--sunk2);color:var(--ink3);font-size:14px}
+.pki img.round{border-radius:50%}
+.pki[aria-pressed=true]{background:var(--acc-soft);color:var(--acc)}
+.pmod{display:flex;align-items:center;gap:10px}
+.pmod b{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:14px}
+.pfimg{display:flex;align-items:center;gap:14px}
+.pfimg .cv{width:84px;flex:none;border-radius:12px}
+.pfimg .cv .ph{font-size:30px}
 .found{display:flex;flex-direction:column;gap:8px}
 .found label{display:flex;align-items:center;gap:12px;padding:10px 12px;border-radius:12px;border:1px solid var(--line2);background:var(--card2)}
 .found input[type=checkbox]{width:18px;height:18px;accent-color:var(--acc)}
@@ -784,6 +806,8 @@ const ICON = {
   lock: '<rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>',
   brush: '<path d="M18 3l3 3-9.5 9.5-3-3zM8.5 12.5 6 15c-1.7 1.7-1 4-3 5 3 .5 6-.3 7-2.5l1.5-2"/>',
   copy: '<rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a1 1 0 0 1 1-1h10"/>',
+  user: '<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/>',
+  gear: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>',
   palette: '<path d="M12 3a9 9 0 1 0 0 18c1.1 0 1.6-.8 1.6-1.6 0-.9-.6-1.3-.6-2.1 0-.9.7-1.5 1.6-1.5H17a4 4 0 0 0 4-4c0-4.9-4-8.8-9-8.8z"/><circle cx="7.5" cy="11" r="1.2"/><circle cx="10" cy="7" r="1.2"/><circle cx="14.5" cy="7" r="1.2"/>',
 };
 const ic = (n, s = 18, w = 2) => `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="${w}" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICON[n]}</svg>`;
@@ -799,10 +823,11 @@ async function api(method, path, body) {
   if (!r.ok) throw new Error(d && d.error || `서버 오류 (${r.status})`);
   return d;
 }
-function upload(file, params, onProg) {
+const upload = (file, params, onProg) => putFile('/api/upload?' + new URLSearchParams(params), file, onProg);
+function putFile(url, file, onProg) {
   return new Promise((res, rej) => {
     const x = new XMLHttpRequest();
-    x.open('PUT', '/api/upload?' + new URLSearchParams(params));
+    x.open('PUT', url);
     x.setRequestHeader('X-BS', '1');
     x.upload.onprogress = e => e.lengthComputable && onProg && onProg(e.loaded / e.total);
     x.onload = () => { let d = {}; try { d = JSON.parse(x.responseText); } catch (e) {} if (x.status === 401 && d.login) showLogin(); x.status < 300 ? res(d) : rej(new Error(d.error || `올리기 실패 (${x.status})`)); };
@@ -909,14 +934,13 @@ function renderSide() {
     <a class="nav" href="#/"${cur('/')}>${ic('home')}홈</a>
     <a class="nav" href="#/all"${cur('/all')}>${ic('all')}서재 전체<span class="n">${st.bots}</span></a>
     <a class="nav" href="#/chats"${cur('/chats')}>${ic('chat')}채팅 로그<span class="n">${st.chats}</span></a>
+    <a class="nav" href="#/personas"${cur('/personas')}${r.startsWith('/p/') ? ' aria-current="page"' : ''}>${ic('user')}페르소나<span class="n">${st.personas || 0}</span></a>
     <a class="nav" href="#/shelf"${cur('/shelf')}>${ic('box')}자료함<span class="n">${st.items}</span></a>
     <a class="nav" href="#/styles"${cur('/styles')}>${ic('brush')}그림체<span class="n">${st.styles}</span></a>
     <div class="sideh">폴더<button class="ib" data-act="newfolder" aria-label="새 폴더">${ic('plus', 16)}</button></div>
     ${botFolders().map(f => `<a class="nav" href="#/f/${f.id}"${cur('/f/' + f.id)}><span class="dot" style="background:${f.color}"></span>${h(f.name)}<span class="n">${f.count}</span></a>`).join('')}
     <div class="grow"></div>
-    <button class="nav" data-act="theme" style="border:0;background:none;width:100%;margin-top:12px">${ic('palette')}테마·글꼴<span class="n">${h(themeName())}</span></button>
-    <button class="nav" data-act="lock" style="border:0;background:none;width:100%">${ic('lock')}잠금<span class="n">${LOCK[(S.auth || {}).mode] || LOCK.off}</span></button>
-    <button class="nav" data-act="export" style="border:0;background:none;width:100%">${ic('dl')}내보내기 · 들이기</button>
+    <button class="nav" data-act="settings" style="border:0;background:none;width:100%;margin-top:12px">${ic('gear')}설정</button>
     <button class="btn pri" data-act="add" style="margin:8px 4px 0">${ic('plus', 18)}봇 들이기</button>`;
 }
 document.addEventListener('click', e => {
@@ -928,7 +952,28 @@ document.addEventListener('click', e => {
   if (act === 'theme') { document.body.classList.remove('drawer'); themeDialog(); }
   if (act === 'lock') { document.body.classList.remove('drawer'); lockDialog(); }
   if (act === 'export') { document.body.classList.remove('drawer'); exportDialog(); }
+  if (act === 'settings') { document.body.classList.remove('drawer'); settingsDialog(); }
 });
+// ---- 설정: 자잘한 설정을 한곳에 (누르면 그 창이 열림) ----
+function settingsDialog() {
+  const st = S.state, fontName = (FONTS.find(f => f[0] === fontPref()) || FONTS[0])[1];
+  const row = (k, icon, name, sub, v) => `<button type="button" class="setr" data-s="${k}">${ic(icon, 20)}<span class="tx"><b>${name}</b><small>${sub}</small></span><span class="v">${v}</span></button>`;
+  const m = modal(`<header><h2>설정</h2>${xBtn}</header>
+    <div class="bd"><div class="sets">
+      <p class="legend">보기</p>
+      ${row('theme', 'palette', '테마·글꼴', '이 기기에만 저장돼요', `${h(themeName())} · ${h(fontName)}`)}
+      <p class="legend">이름표</p>
+      ${row('statuses', 'star', '봇 상태', '하는 중 · 찜 · 끝 같은 서재 위 칸', `${st.statuses.length}개`)}
+      ${row('itypes', 'box', '자료 종류', '자료함 위 칸', `${st.itypes.length}개`)}
+      ${row('stypes', 'brush', '그림체 분류', '그림체 위 칸', `${st.stypes.length}개`)}
+      <p class="legend">자료</p>
+      ${row('export', 'dl', '내보내기 · 들이기', '서재를 압축 파일 하나로 받기 · 받아 둔 파일 다시 들이기', '')}
+      ${row('lock', 'lock', '잠금', '비밀번호를 언제 물을지', LOCK[(S.auth || {}).mode] || LOCK.off)}
+    </div></div>`, 'narrow');
+  const open = {theme: themeDialog, lock: lockDialog, export: exportDialog,
+    statuses: () => labelDialog('statuses', route), itypes: () => labelDialog('itypes', route), stypes: () => labelDialog('stypes', route)};
+  $$('.setr', m).forEach(b => b.onclick = () => { m.close(); open[b.dataset.s](); });
+}
 // ---- 내보내기 · 들이기: 봇카이브 없이도 열리는 폴더로 받고, 받은 압축 파일을 다시 들임 ----
 function exportDialog() {
   const m = modal(`<header><h2>내보내기 · 들이기</h2>${xBtn}</header>
@@ -939,14 +984,15 @@ function exportDialog() {
         <ul class="hint" style="padding-left:18px;line-height:1.8">
           <li><b>봇/폴더/봇 이름/버전 이름/</b> — 올린 원본 그대로(카드 · 모듈 · 프리셋)와 소개글</li>
           <li>폴더가 여러 개인 봇은 첫 폴더에 하나만 넣고, 나머지 폴더는 info.txt와 다시 들이기용 목록에 적어요</li>
-          <li><b>채팅 로그</b>는 리스 형식(.json), <b>그림체</b>는 프롬프트 글 파일 · 샘플 그림</li></ul>
+          <li><b>채팅 로그</b>는 리스 형식(.json), <b>그림체</b>는 프롬프트 글 파일 · 샘플 그림</li>
+          <li><b>페르소나</b>는 프롬프트 글 파일 · 그림 · 모듈 (PNG 그림은 리스의 페르소나 불러오기로 바로 넣을 수 있어요)</li></ul>
         <div class="xrow"><span class="hint">서재 크기만큼 커요. 받다 끊기면 처음부터 다시 받아요.</span><a class="btn pri" href="/api/export" download data-go>${ic('dl', 16)}내려받기</a></div>
       </section>
       <section class="xsec">
         <h3>들이기</h3>
         <p style="margin:0">전부 내보내기로 받은 압축 파일(.zip)을 이 서재에 더해요.</p>
         <ul class="hint" style="padding-left:18px;line-height:1.8">
-          <li>폴더 · 상태 · 태그 · 버전 · 소개글 · 채팅 로그 · 그림체까지 그대로 들어와요</li>
+          <li>폴더 · 상태 · 태그 · 버전 · 소개글 · 채팅 로그 · 그림체 · 페르소나까지 그대로 들어와요</li>
           <li>이름과 만든 사람이 같은 봇이 이미 있으면 건너뛰어요 (같은 파일을 두 번 들여도 겹치지 않아요)</li>
           <li>큰 파일은 조각으로 올려요. 끊기면 같은 파일을 다시 고르면 이어서 올려요</li></ul>
         <div data-imp></div>
@@ -967,8 +1013,8 @@ function drawImp() {
     return;
   }
   const r = s && s.result;
-  const done = r ? [[r.bots, '봇'], [r.items, '자료'], [r.styles, '그림체'], [r.chats, '채팅 로그'], [r.files, '원본 파일']].filter(x => x[0]).map(x => `${x[1]} ${x[0]}개`).join(' · ') : '';
-  const skip = r ? [...r.skipped, ...r.skipped_styles] : [];
+  const done = r ? [[r.bots, '봇'], [r.items, '자료'], [r.styles, '그림체'], [r.personas, '페르소나'], [r.chats, '채팅 로그'], [r.files, '원본 파일']].filter(x => x[0]).map(x => `${x[1]} ${x[0]}개`).join(' · ') : '';
+  const skip = r ? [...r.skipped, ...r.skipped_styles, ...(r.skipped_personas || [])] : [];
   box.innerHTML = `${r ? `<p style="margin:0 0 6px"><b>${done || '새로 들인 것이 없어요'}</b>${done ? ' 들였어요' : ''}</p>
       ${skip.length ? `<p class="hint">이미 있어서 건너뛴 것 ${skip.length}개: ${h(skip.slice(0, 8).join(', '))}${skip.length > 8 ? ' …' : ''}</p>` : ''}
       ${r.missing ? `<p class="hint">압축 파일에 없어서 못 들인 원본 ${r.missing}개</p>` : ''}
@@ -1561,8 +1607,8 @@ async function viewMain() {
       <a class="ib" href="#/chats" aria-label="채팅 로그" title="채팅 로그">${ic('chat', 20)}</a>
       <a class="ib" href="#/shelf" aria-label="자료함" title="자료함">${ic('box', 20)}</a>
       <a class="ib" href="#/styles" aria-label="그림체" title="그림체">${ic('brush', 20)}</a>
-      <button class="ib" data-act="theme" aria-label="테마" title="테마">${ic('palette', 20)}</button>
-      <button class="ib" data-act="lock" aria-label="잠금" title="잠금 (로그인)">${ic('lock', 20)}</button>
+      <a class="ib" href="#/personas" aria-label="페르소나" title="페르소나">${ic('user', 20)}</a>
+      <button class="ib" data-act="settings" aria-label="설정" title="설정 (테마·잠금·내보내기)">${ic('gear', 20)}</button>
       <button class="btn sm pri" data-act="add" style="margin-left:6px">${ic('plus', 16)}<span class="t">봇 들이기</span></button></div>
     <div class="mhead"><div class="k">자료 ${st.items} · 그림체 ${st.styles}</div>
       <h1>${h(gr.title)}</h1>
@@ -1824,7 +1870,9 @@ function drawAside() {
     ${b.itype ? '' : `<div class="box"><h3>${ic('brush', 16)}그림체<button class="ib" id="bsAdd" aria-label="그림체 잇기" title="그림체 잇기">${ic('plus', 16)}</button></h3>
       ${(b.styles || []).length ? `<div class="sbl">${b.styles.map(x => `<a class="sbr" href="#/s/${x.id}">${x.cover ? `<img src="/m/${h(x.cover)}" alt="" loading="lazy">` : `<span class="sph">${ic('brush', 16)}</span>`}
         <span class="sbn">${h(x.name)}</span><span class="srole ${x.role}">${SROLE[x.role]}</span></a>`).join('')}</div>`
-        : '<p class="hint">공식 그림체나, 이 봇에 어울리는 그림체를 이어 두세요.</p>'}</div>`}
+        : '<p class="hint">공식 그림체나, 이 봇에 어울리는 그림체를 이어 두세요.</p>'}</div>
+      <div class="box" id="bPer"><h3>${ic('user', 16)}기본 페르소나</h3>${personaChip(b.persona, '없음')}
+        <p class="hint" style="margin:8px 0 0">${b.persona ? '이 봇에 새로 올리는 채팅 로그에 알아서 붙어요.' : '정해 두면 이 봇에 새로 올리는 채팅 로그에 알아서 붙어요.'}</p></div>`}
     <div class="box"><h3>내 메모<a class="ib" href="#/b/${b.id}/memo" data-rep aria-label="메모 쓰기">${ic('edit', 15)}</a></h3>
       ${b.memo ? `<div class="memo-pre">${h(b.memo)}</div>` : '<p class="hint">아직 메모가 없어요.</p>'}</div>`;
   $('#lkAdd').onclick = () => linkDialog();
@@ -1834,6 +1882,13 @@ function drawAside() {
     pickDialog({title: '그림체 잇기', sub: B.name, empty: '아직 그림체가 없어요. 왼쪽 목차의 그림체에서 먼저 들여 주세요.',
       items: list.filter(x => !have.has(x.id)).map(x => ({id: x.id, name: x.name, cover: x.cover, sub: STYPE[x.stype] || ''})),
       onPick: async (sid, role) => { await api('POST', `/api/styles/${sid}/bots`, {bot_id: B.id, role}); await viewBot(B.id, curTab()); }});
+  };
+  if ($('#bPer')) $('[data-pchip]', $('#bPer')).onclick = async () => {
+    const unset = B.chats.filter(c => !c.persona_id).length;
+    const r = await personaPick({title: '기본 페르소나', sub: B.name, cur: B.persona_id, none: '없음',
+      extra: unset ? `<label class="row" style="gap:8px;margin-top:4px;font-size:14px"><input type="checkbox" id="ppFill" style="width:17px;height:17px;accent-color:var(--acc)">페르소나를 지정 안 한 채팅 로그 ${unset}개에도 붙이기</label>` : ''});
+    if (!r) return;
+    try { await api('PUT', `/api/bots/${B.id}`, {persona_id: r.id, fill_chats: r.fill}); await viewBot(B.id, curTab()); } catch (e) { fail(e); }
   };
   $$('[data-peek]').forEach(x => x.onclick = () => { location.hash = `#/b/${B.id}/${x.dataset.peek}`; });
   $$('[data-le]').forEach(x => x.onclick = () => linkDialog(B.links.find(l => l.id === +x.dataset.le)));
@@ -2365,7 +2420,7 @@ function chatSeries(c, after) {
 function chatRow(c, withBot, acts, ep) {
   const range = c.first_at ? (day(c.first_at) === day(c.last_at) ? day(c.first_at) : `${day(c.first_at)} ~ ${day(c.last_at)}`) : day(c.created) + '에 올림';
   const row = `<a class="ch" href="#/c/${c.id}">${withBot ? cover({id: c.bot_id, name: c.bot_name, cover: c.bot_cover}) + '</div>' : `<span class="fi" style="width:46px;height:46px">${ic('chat', 20)}</span>`}
-    <div style="min-width:0"><b>${ep != null ? `<span class="ep">${ep}화</span>` : ''}${h(c.title)}</b><span class="meta">${withBot ? `<span>${h(c.bot_name)}</span>` : ''}${withBot && c.series ? `<span>${ic('folder', 12)} ${h(c.series)}</span>` : ''}<span>메시지 ${c.count}</span><span>${range}</span></span>
+    <div style="min-width:0"><b>${ep != null ? `<span class="ep">${ep}화</span>` : ''}${h(c.title)}</b><span class="meta">${withBot ? `<span>${h(c.bot_name)}</span>` : ''}${withBot && c.series ? `<span>${ic('folder', 12)} ${h(c.series)}</span>` : ''}${c.persona_name ? `<span title="페르소나">${ic('user', 12)} ${h(c.persona_name)}</span>` : ''}<span>메시지 ${c.count}</span><span>${range}</span></span>
     ${c.memo ? `<span class="meta" style="display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${h(c.memo)}</span>` : ''}</div>
     ${c.marks ? `<span class="star">★ ${c.marks}</span>` : ''}</a>`;
   return acts ? `<div class="chw" data-cid="${c.id}">${row}<div class="chacts">
@@ -2433,7 +2488,7 @@ function chatDownload(id) {
         saveBlob(new Blob([JSON.stringify({type: 'risuChat', ver: 1, data})], {type: 'application/json'}), fileSafe(c.title) + '.json');
       } else {
         const mk = new Map((c.marks || []).map(x => [x.idx, x]));
-        const who = g => g.role === 'user' ? (g.name || '나') : (g.name || c.bot_name);
+        const who = g => g.role === 'user' ? (c.persona_name || g.name || '나') : (g.name || c.bot_name);
         const head = [c.title, `${c.bot_name} · 메시지 ${c.count}`, c.memo ? `\n메모: ${c.memo}` : '', '\n' + '─'.repeat(30) + '\n'];
         const body = c.messages.map(g => `[${who(g)}]${g.at ? ' ' + day(g.at) : ''} #${g.idx + 1}\n${g.text.trim()}\n${mk.has(g.idx) ? `★ 표시한 장면${mk.get(g.idx).memo ? ' — ' + mk.get(g.idx).memo : ''}\n` : ''}`);
         saveBlob(new Blob(['\ufeff' + head.filter(Boolean).join('\n') + '\n' + body.join('\n')], {type: 'text/plain;charset=utf-8'}), fileSafe(c.title) + '.txt');
@@ -2720,25 +2775,35 @@ async function importChats(files, bot) {
   }
   t.remove();
   if (!found.length) return;
-  const bots = bot ? null : await api('GET', '/api/bots');
+  const [bots, personas] = await Promise.all([bot ? null : api('GET', '/api/bots'), api('GET', '/api/personas').catch(() => [])]);
+  personas.sort((a, b) => a.name.localeCompare(b.name, 'ko', {numeric: true}));
   const m = modal(`<header><h2>채팅 로그 올리기</h2><span>${found.length}개 찾음</span>${xBtn}</header>
     <div class="bd">
       ${bot ? '' : `<label class="field">어느 봇의 기록인가요?<select class="inp" id="cBot">${bots.map(b => `<option value="${b.id}">${h(b.name)}</option>`).join('')}</select></label>`}
+      ${personas.length ? `<label class="field">페르소나<select class="inp" id="cPerSel"><option value="">지정 안 함</option>${personas.map(x => `<option value="${x.id}">${h(x.name)}</option>`).join('')}</select>
+        <span class="hint" style="margin:0">봇에 기본 페르소나를 정해 두면 알아서 골라져요</span></label>` : ''}
       <div class="found">${found.map((c, i) => `<label><input type="checkbox" data-i="${i}" checked>
         <input class="inp" data-t="${i}" value="${h(c.title)}"><span class="meta" style="white-space:nowrap">메시지 ${c.msgs.length}</span></label>`).join('')}</div>
       <p class="hint">그림 에셋은 빼고 글만 보관해요. 글 속 그림 자리는 '그림' 표시로 남아요.</p>
     </div>
     <footer><span class="note"></span><button class="btn" data-close>취소</button><button class="btn pri" data-ok>올리기</button></footer>`);
   if (!bot && !bots.length) { m.close(); return toast('먼저 봇을 서재에 꽂아 주세요', true); }
+  const perSel = $('#cPerSel', m);
+  if (perSel) {
+    const def = () => { const b = bot || bots.find(x => x.id === +$('#cBot', m).value); perSel.value = String(b && b.persona_id || ''); };
+    def();
+    if (!bot) $('#cBot', m).addEventListener('change', def);
+  }
   $('[data-ok]', m).onclick = async () => {
     const btn = $('[data-ok]', m); btn.disabled = true;
     const bid = bot ? bot.id : +$('#cBot', m).value;
+    const pz = perSel ? {persona_id: +perSel.value || null} : {};
     let last = null, n = 0;
     try {
       for (const [i, c] of found.entries()) {
         if (!$(`[data-i="${i}"]`, m).checked) continue;
         btn.textContent = `올리는 중 ${++n}…`;
-        const d = await api('POST', '/api/chats', {bot_id: bid, title: $(`[data-t="${i}"]`, m).value, memo: c.memo, source: c.src, messages: c.msgs});
+        const d = await api('POST', '/api/chats', {bot_id: bid, title: $(`[data-t="${i}"]`, m).value, memo: c.memo, source: c.src, messages: c.msgs, ...pz});
         last = d.id;
       }
       m.close(); await loadState();
@@ -2969,6 +3034,7 @@ async function viewChat(id) {
   const marks = new Map(C.marks.map(m => [m.idx, m]));
   let mode = 'all';
   const bot = {id: C.bot_id, name: C.bot_name, cover: C.bot_cover};
+  const per = C.persona_id ? {id: C.persona_id, name: C.persona_name, image: C.persona_image} : null;
   const sr = C.series ? seriesSort(siblings.filter(c => c.series === C.series)) : [], at = sr.findIndex(c => c.id === C.id);
   const prev = at > 0 ? sr[at - 1] : null, next = at >= 0 && at < sr.length - 1 ? sr[at + 1] : null;
   let rdSize = 16, showTh = false;
@@ -2983,6 +3049,7 @@ async function viewChat(id) {
       <button class="ib danger" id="cDel" aria-label="로그 지우기" title="로그 지우기">${ic('trash', 17)}</button></div>
     <input class="ttl" id="cTitle" value="${h(C.title)}" aria-label="채팅 제목">
     <p class="meta" style="margin:4px 0 0">${C.series ? `${ic('folder', 13)} ${h(C.series)} · ${at + 1}화 / ${sr.length} · ` : ''}메시지 ${C.count}${C.first_at ? ` · ${day(C.first_at)} ~ ${day(C.last_at)}` : ''}</p>
+    <div class="row" id="cPer" style="margin-top:10px">${personaChip(per)}</div>
     <details class="rd-memo"${C.memo ? ' open' : ''}><summary>${ic('memo', 15)}로그 메모${C.memo ? '' : ' 쓰기'}</summary>
       <textarea class="inp" id="cMemo" placeholder="어떤 루트였는지, 언제 했는지, 기억해 둘 점… (쓰는 대로 저장돼요)">${h(C.memo)}</textarea></details>
     <div class="cbar"><a class="ib cbk" href="#/b/${C.bot_id}/chats" aria-label="${h(C.bot_name)} 채팅 로그로" title="${h(C.bot_name)} 채팅 로그로">${ic('back', 18)}</a><div class="seg" id="cMode">
@@ -3022,8 +3089,9 @@ async function viewChat(id) {
     const d = document.createElement('div');
     d.className = 'msg ' + (u ? 'u' : 'c');
     d.dataset.idx = g.idx;
-    d.innerHTML = `${u ? '' : `<div class="av" style="background:${tint(bot.id)}">${bot.cover ? `<img src="/m/${h(bot.cover)}" alt="" loading="lazy">` : h([...bot.name][0])}</div>`}
-      <div class="bub"><div class="who"><b>${h(u ? (g.name || '나') : (g.name || bot.name))}</b>${g.at ? `<span>${day(g.at)}</span>` : ''}<span>#${g.idx + 1}</span></div>
+    const av = u ? per : bot, pic = u ? per && per.image : bot.cover;
+    d.innerHTML = `${av ? `<div class="av" style="background:${tint(av.id)}">${pic ? `<img src="/m/${h(pic)}" alt="" loading="lazy">` : first(av.name)}</div>` : ''}
+      <div class="bub"><div class="who"><b>${h(u ? (per ? per.name : g.name || '나') : (g.name || bot.name))}</b>${g.at ? `<span>${day(g.at)}</span>` : ''}<span>#${g.idx + 1}</span></div>
       <button class="mk" aria-label="장면 표시" title="장면 표시">${ic('star', 18)}</button></div>`;
     const body = u ? msgNode(g.text) : richMsg(g.text);
     if (showTh) $$('.thought', body).forEach(t => t.open = true);
@@ -3097,7 +3165,12 @@ async function viewChat(id) {
   };
   $('#cDl').onclick = () => chatDownload(C.id);
   $('#cRx').onclick = () => rxDialog(C.bot_id, C.messages.map(x => x.text), () => { const y = scrollY; viewChat(C.id).then(() => scrollTo(0, y)); });
-  $('#cMore').onclick = async () => { const fs = await pick('.json,.jsonl', true); if (fs.length) importChats(fs, {id: C.bot_id, name: C.bot_name}); };
+  $('#cMore').onclick = async () => { const fs = await pick('.json,.jsonl', true); if (fs.length) importChats(fs, {id: C.bot_id, name: C.bot_name, persona_id: C.bot_persona}); };
+  $('[data-pchip]', $('#cPer')).onclick = async () => {
+    const r = await personaPick({title: '이 로그의 페르소나', sub: C.title, cur: C.persona_id});
+    if (!r || r.id === (C.persona_id || null)) return;
+    try { await api('PUT', `/api/chats/${C.id}`, {persona_id: r.id}); const y = scrollY; await viewChat(C.id); scrollTo(0, y); } catch (e) { fail(e); }
+  };
 }
 
 // ---- 채팅 로그 모아 보기 ----
@@ -3113,6 +3186,231 @@ async function viewChats() {
     <div class="chats" id="allChats">${d.chats.map(c => chatRow(c, true, true)).join('') || '<div class="empty"><h3>아직 채팅 로그가 없어요</h3><p>리스에서 채팅을 JSON으로 내보내 올려 보세요.</p></div>'}</div></div>`;
   $('#cUp').onclick = async () => { const fs = await pick('.json,.jsonl', true); if (fs.length) importChats(fs, null); };
   bindChatRows($('#allChats'), d.chats, () => viewChats());
+}
+
+// ---- 페르소나: 그림 한 장 + 프롬프트 + 메모, 있으면 페르소나용 모듈 하나 ----
+// 채팅 로그마다 고르고(기본은 지정 안 함), 봇에 기본 페르소나를 정해 두면 새 로그에 알아서 붙음
+const first = s => h([...(s || '?')][0]);
+const personaCover = x => `<div class="cv" style="background:${tint(x.id || 0)}">${x.image ? `<img src="/m/${h(x.image)}" alt="" loading="lazy">` : `<span class="ph">${first(x.name)}</span>`}`;
+const personaAv = x => x.image ? `<img class="round" src="/m/${h(x.image)}" alt="" loading="lazy">` : `<span class="pav">${first(x.name)}</span>`;
+function personaChip(x, none = '페르소나 지정 안 함') {
+  return x && x.id ? `<button type="button" class="pchip" data-pchip title="페르소나 바꾸기">${x.image ? `<img src="/m/${h(x.image)}" alt="">` : `<span class="pav">${first(x.name)}</span>`}<span>${h(x.name)}</span></button>`
+    : `<button type="button" class="pchip none" data-pchip>${ic('user', 14)}<span>${h(none)}</span></button>`;
+}
+// 리스에서 내보낸 페르소나 PNG: tEXt 'persona' = base64(JSON {name, personaPrompt, note})
+async function personaPngText(file) {
+  if (file.size > 40e6) return null;
+  const b = new Uint8Array(await file.arrayBuffer()), dv = new DataView(b.buffer);
+  if (b[0] !== 0x89 || b[1] !== 0x50) return null;
+  for (let pos = 8; pos + 12 <= b.length;) {
+    const len = dv.getUint32(pos), type = String.fromCharCode(...b.subarray(pos + 4, pos + 8));
+    if (type === 'IEND') break;
+    if (type === 'tEXt') {
+      const d = b.subarray(pos + 8, pos + 8 + len), z = d.indexOf(0);
+      if (z > 0 && new TextDecoder().decode(d.subarray(0, z)) === 'persona') {
+        try { const j = JSON.parse(b64utf8(new TextDecoder('latin1').decode(d.subarray(z + 1)))); return j && typeof j === 'object' ? j : null; } catch (e) { return null; }
+      }
+    }
+    pos += 12 + len;
+  }
+  return null;
+}
+const CRC_T = (() => { const t = new Uint32Array(256); for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; } return t; })();
+const crc32 = b => { let c = 0xFFFFFFFF; for (const x of b) c = CRC_T[(c ^ x) & 255] ^ (c >>> 8); return (c ^ 0xFFFFFFFF) >>> 0; };
+// 리스의 페르소나 불러오기로 바로 넣을 수 있는 PNG (그림이 없으면 리스처럼 회색 네모)
+async function personaPng(x) {
+  const bmp = x.image ? await createImageBitmap(await (await fetch(`/m/${x.image}`)).blob()) : null;
+  const c = document.createElement('canvas');
+  c.width = bmp ? bmp.width : 256; c.height = bmp ? bmp.height : 256;
+  const g = c.getContext('2d');
+  if (bmp) g.drawImage(bmp, 0, 0); else { g.fillStyle = 'rgb(100, 116, 139)'; g.fillRect(0, 0, 256, 256); }
+  const png = new Uint8Array(await (await new Promise(r => c.toBlob(r, 'image/png'))).arrayBuffer());
+  const js = new TextEncoder().encode(JSON.stringify({name: x.name, personaPrompt: x.prompt || '', note: x.memo || ''}));
+  let bin = '';
+  for (let i = 0; i < js.length; i += 0x8000) bin += String.fromCharCode(...js.subarray(i, i + 0x8000));
+  const data = new TextEncoder().encode('persona\0' + btoa(bin));
+  const ck = new Uint8Array(12 + data.length), dv = new DataView(ck.buffer);
+  dv.setUint32(0, data.length); ck.set([116, 69, 88, 116], 4); ck.set(data, 8);
+  dv.setUint32(8 + data.length, crc32(ck.subarray(4, 8 + data.length)));
+  return new Blob([png.subarray(0, png.length - 12), ck, png.subarray(png.length - 12)], {type: 'image/png'});  // 맨 끝 IEND 앞에
+}
+const putModule = (pid, f, onProg) => putFile(`/api/personas/${pid}/module?name=${encodeURIComponent(f.name)}`, f, onProg);
+function personaDialog(p) {
+  return new Promise(res => {
+    let img = null, drop = false, mod = null;  // 새 그림(data URL) · 그림 빼기 · 고른 모듈 파일
+    const m = modal(`<header><h2>${p ? '페르소나 고치기' : '새 페르소나'}</h2>${xBtn}</header>
+      <div class="bd">
+        <div class="pfimg"><div class="cv" id="pfCv" style="background:${tint(p ? p.id : 0)}"></div>
+          <div style="display:flex;flex-direction:column;gap:8px;align-items:flex-start"><div class="row"><button type="button" class="btn sm" id="pfPick">${ic('img', 15)}그림 고르기</button>
+            <button type="button" class="btn sm ghost" id="pfDrop" hidden>${ic('trash', 15)}빼기</button></div>
+            <span class="hint" style="margin:0">리스에서 내보낸 페르소나 PNG를 고르면 이름 · 프롬프트를 알아서 채워요. 그림은 이 창에 붙여넣어도 돼요.</span></div></div>
+        <label class="field">이름<input class="inp" id="pfName" maxlength="100" value="${h(p ? p.name : '')}" placeholder="예: 기본 나 · 기사 루트용"></label>
+        <label class="field">프롬프트<textarea class="inp" id="pfPrompt" style="min-height:220px" placeholder="리스 페르소나의 설명 칸에 넣는 글">${h(p ? p.prompt : '')}</textarea></label>
+        <label class="field">메모<textarea class="inp" id="pfMemo" style="min-height:80px" placeholder="어떤 봇에 썼는지, 기억해 둘 점… (리스 페르소나의 노트)">${h(p ? p.memo : '')}</textarea></label>
+        ${p ? '' : `<div class="field">페르소나용 모듈 <span class="meta">있을 때만</span><div class="row"><button type="button" class="btn sm ghost" id="pfMod">${ic('puzzle', 15)}모듈 고르기 (.risum)</button><span class="meta" id="pfModN"></span></div></div>`}
+      </div>
+      <footer><span class="note"></span><button class="btn" data-close>취소</button><button class="btn pri" data-ok>${p ? '저장' : '만들기'}</button></footer>`);
+    m.onclose = () => res(null);
+    const drawImg = () => {
+      const u = img || (!drop && p && p.image ? `/m/${p.image}` : '');
+      $('#pfCv', m).innerHTML = u ? `<img src="${h(u)}" alt="">` : `<span class="ph pi">${ic('user', 34, 1.4)}</span>`;
+      $('#pfDrop', m).hidden = !u;
+    };
+    drawImg();
+    const setImg = async f => {
+      try {
+        const r = await personaPngText(f).catch(() => null);
+        if (r) {
+          const fill = (sel, v) => { if (typeof v === 'string' && v.trim() && !$(sel, m).value.trim()) $(sel, m).value = v; };
+          fill('#pfName', r.name); fill('#pfPrompt', r.personaPrompt); fill('#pfMemo', r.note);
+          toast('리스 페르소나를 읽어서 빈 칸을 채웠어요');
+        }
+        img = await imgData(f); drop = false; drawImg();
+      } catch (e) { fail(e); }
+    };
+    $('#pfPick', m).onclick = async () => { const [f] = await pick('image/*'); if (f) setImg(f); };
+    $('#pfDrop', m).onclick = () => { img = null; drop = true; drawImg(); };
+    m.addEventListener('paste', e => { const it = [...e.clipboardData.items].find(i => i.type.startsWith('image/')); if (it) { e.preventDefault(); setImg(it.getAsFile()); } });
+    if ($('#pfMod', m)) $('#pfMod', m).onclick = async () => { const [f] = await pick('.risum'); if (f) { mod = f; $('#pfModN', m).textContent = `${f.name} · ${size(f.size)}`; } };
+    $('[data-ok]', m).onclick = async () => {
+      const name = $('#pfName', m).value.trim();
+      if (!name) return toast('이름을 적어 주세요', true);
+      const body = {name, prompt: $('#pfPrompt', m).value, memo: $('#pfMemo', m).value};
+      if (img) body.image = img; else if (drop) body.drop_image = true;
+      const btn = $('[data-ok]', m); btn.disabled = true;
+      try {
+        let x = p ? await api('PUT', `/api/personas/${p.id}`, body) : await api('POST', '/api/personas', body);
+        if (mod) { btn.textContent = '모듈 올리는 중…'; x = await putModule(x.id, mod, k => { btn.textContent = `모듈 올리는 중 ${Math.round(k * 100)}%`; }); }
+        m.onclose = null; m.close(); res(x);
+      } catch (e) { fail(e); btn.disabled = false; btn.textContent = p ? '저장' : '만들기'; }
+    };
+  });
+}
+// 페르소나 고르기 창 → {id(없으면 null), fill} · 닫으면 undefined
+async function personaPick({title, sub, cur, none = '지정 안 함', extra = ''}) {
+  let list;
+  try { list = await api('GET', '/api/personas'); } catch (e) { fail(e); return undefined; }
+  list.sort((a, b) => a.name.localeCompare(b.name, 'ko', {numeric: true}));
+  return new Promise(res => {
+    const m = modal(`<header><h2>${h(title)}</h2><span>${h(sub || '')}</span>${xBtn}</header>
+      <div class="bd">${list.length > 8 ? '<input class="inp" id="ppQ" placeholder="이름으로 찾기" autocomplete="off">' : ''}
+        <div class="pkl"><button type="button" class="pki" data-id="" aria-pressed="${!cur}"><span class="pav">${ic('user', 16)}</span><b>${h(none)}</b></button>
+          ${list.map(x => `<button type="button" class="pki" data-id="${x.id}" data-q="${h(x.name.toLowerCase())}" aria-pressed="${x.id === cur}">${personaAv(x)}<b>${h(x.name)}</b>
+            <span class="meta">${x.nchats ? `로그 ${x.nchats}` : ''}</span></button>`).join('')}</div>
+        ${list.length ? '' : `<p class="hint" style="margin:0">아직 페르소나가 없어요. 왼쪽 목차의 <a href="#/personas" data-close>페르소나</a>에서 먼저 만들어 주세요.</p>`}
+        ${extra}</div>`, 'narrow');
+    m.onclose = () => res(undefined);
+    if ($('#ppQ', m)) $('#ppQ', m).oninput = e => { const q = e.target.value.trim().toLowerCase(); $$('.pki[data-q]', m).forEach(x => x.hidden = q && !x.dataset.q.includes(q)); };
+    $$('.pki', m).forEach(b => b.onclick = () => {
+      res({id: b.dataset.id ? +b.dataset.id : null, fill: !!($('#ppFill', m) || {}).checked});
+      m.onclose = null; m.close();
+    });
+  });
+}
+async function viewPersonas() {
+  const list = await api('GET', '/api/personas');
+  const card = x => `<a class="bc" href="#/p/${x.id}" data-q="${h(x.name.toLowerCase())}">${personaCover(x)}${x.module_name ? `<span class="cc" title="모듈 있음">${ic('puzzle', 14)}</span>` : ''}</div>
+      <b>${h(x.name)}</b><span class="who">${[x.nchats ? `로그 ${x.nchats}` : '', x.nbots ? `기본 봇 ${x.nbots}` : ''].filter(Boolean).join(' · ') || '아직 안 씀'}</span></a>`;
+  $('#view').innerHTML = `<div class="wrap">
+    <div class="toolbar" style="margin-bottom:26px"><span class="dot" style="width:16px;height:16px;border-radius:5px;background:var(--acc)"></span>
+      <h1 class="disp" style="margin:0;font-size:34px">페르소나</h1><span class="meta" style="font-size:14px">페르소나 ${list.length}</span>
+      <button class="btn sm ghost" id="pImp" style="margin-left:auto" title="리스에서 내보낸 페르소나 PNG 여러 장을 한 번에">${ic('dl', 16)}리스 PNG 들이기</button>
+      <button class="btn sm pri" data-padd>${ic('plus', 16)}새 페르소나</button></div>
+    ${list.length ? `<div class="toolbar">
+        <label class="search">${ic('search', 16)}<input id="q" placeholder="이름 찾기" autocomplete="off"></label>
+        <label class="gsize" title="카드 크기">${ic('gsm', 14)}<input type="range" id="gSize" min="0" max="${GSIZE.length - 1}" step="1" value="${gsize}" aria-label="카드 크기">${ic('glg', 16)}</label></div>
+      <div class="grid" id="grid">${list.map(card).join('')}</div>
+      <p class="hint" id="noHit" hidden style="padding:30px 0;text-align:center">맞는 페르소나가 없어요</p>`
+    : `<div class="empty"><h3>아직 페르소나가 없어요</h3><p>채팅할 때 쓰는 '나'를 모아 두세요. 그림 한 장과 프롬프트면 돼요. 리스에서 내보낸 페르소나 PNG를 넣으면 알아서 읽어요.</p><button class="btn pri" data-padd>${ic('plus')}새 페르소나</button></div>`}
+  </div>`;
+  $$('[data-padd]').forEach(b => b.onclick = async () => { const x = await personaDialog(); if (x) { await loadState(); location.hash = `#/p/${x.id}`; } });
+  $('#pImp').onclick = async () => {
+    const fs = await pick('.png,image/png', true);
+    let n = 0;
+    for (const f of fs) {
+      try {
+        const r = await personaPngText(f);
+        if (!r || !r.name) { toast(`${f.name}: 리스 페르소나 PNG가 아니에요`, true); continue; }
+        await api('POST', '/api/personas', {name: String(r.name), prompt: String(r.personaPrompt || ''), memo: String(r.note || ''), image: await imgData(f)});
+        n++;
+      } catch (e) { fail(new Error(`${f.name}: ${e.message}`)); }
+    }
+    if (n) { toast(`페르소나 ${n}개를 들였어요`); await loadState(); route(); }
+  };
+  if (!list.length) return;
+  $('#q').addEventListener('input', () => {
+    const q = $('#q').value.trim().toLowerCase();
+    let n = 0;
+    $$('#grid .bc').forEach(c => { c.hidden = q && !c.dataset.q.includes(q); n += !c.hidden; });
+    $('#noHit').hidden = n > 0;
+  });
+  applyGsize($('#grid'));
+  $('#gSize').oninput = e => { gsize = +e.target.value; try { localStorage.setItem('bs-size', gsize); } catch (er) {} applyGsize($('#grid')); };
+}
+let PX = null;
+async function viewPersona(id) {
+  const fresh = !PX || PX.id !== id;
+  try { PX = await api('GET', `/api/personas/${id}${fresh ? '?open=1' : ''}`); }
+  catch (e) { $('#view').innerHTML = `<div class="wrap"><div class="empty"><h3>페르소나가 없어요</h3><a class="btn" href="#/personas">페르소나로</a></div></div>`; return; }
+  drawPersona();
+}
+function drawPersona() {
+  const x = PX;
+  $('#view').innerHTML = `<div class="wrap">
+    <button class="backbtn" id="pxBack">${ic('back', 16)}뒤로</button>
+    <section class="bhero">${x.image ? `<div class="bgblur" style="background-image:url('/m/${h(x.image)}')"></div>` : ''}
+      ${personaCover(x)}</div>
+      <div style="flex:1;min-width:0">
+        <h1>${h(x.name)}</h1>
+        <p class="who">${day(x.created)}에 넣음 · 채팅 로그 ${x.chats.length} · 기본으로 쓰는 봇 ${x.bots.length}</p>
+        <div class="row" style="margin-top:18px">
+          <button class="btn sm pri" id="pxCopy"${x.prompt ? '' : ' disabled'}>${ic('copy', 16)}프롬프트 복사</button>
+          <button class="btn sm ghost" id="pxEdit">${ic('edit', 16)}고치기</button>
+          <button class="btn sm ghost" id="pxPng" title="리스의 페르소나 불러오기로 넣을 수 있는 PNG">${ic('dl', 16)}리스용 PNG</button>
+          <button class="btn sm ghost danger" id="pxDel">${ic('trash', 16)}지우기</button>
+        </div>
+      </div>
+    </section>
+    <div class="cols"><div style="min-width:0;display:flex;flex-direction:column;gap:18px">
+      <div class="box"><h3>프롬프트${x.prompt ? `<button class="ib" id="pxCp2" aria-label="프롬프트 복사" title="복사">${ic('copy', 16)}</button>` : ''}</h3>
+        ${x.prompt ? `<pre class="sprm" style="font:14px/1.7 var(--body);max-height:480px">${h(x.prompt)}</pre>` : '<p class="hint">아직 프롬프트가 없어요. 고치기에서 넣어 주세요.</p>'}</div>
+      <div class="box"><h3>${ic('chat', 16)}이 페르소나로 한 채팅 로그 <span class="meta" style="font-weight:500">${x.chats.length}</span></h3>
+        ${x.chats.length ? `<div class="chats">${x.chats.map(c => chatRow(c, true)).join('')}</div>` : '<p class="hint">채팅 로그 화면 위쪽에서 페르소나를 고르면 여기 모여요.</p>'}</div>
+    </div><aside style="display:flex;flex-direction:column;gap:18px">
+      <div class="box"><h3>${ic('puzzle', 16)}페르소나용 모듈</h3>
+        ${x.module ? `<div class="pmod"><span class="fi">RISUM</span><div style="min-width:0;flex:1"><b style="display:block">${h(x.module_name)}</b><span class="meta">${size(x.module_size)}</span></div></div>
+          <div class="row" style="margin-top:12px"><a class="btn sm" href="/api/personas/${x.id}/module" download>${ic('dl', 15)}내려받기</a>
+            <button class="btn sm ghost" id="pxMod">바꾸기</button><button class="btn sm ghost danger" id="pxModDel">빼기</button></div>`
+          : `<p class="hint">이 페르소나와 같이 쓰는 모듈(.risum)이 있으면 올려 두세요.</p><button class="btn sm" id="pxMod">${ic('plus', 15)}모듈 올리기</button>`}
+        <p class="meta" id="pxModSt" style="margin:8px 0 0"></p></div>
+      <div class="box"><h3>${ic('user', 16)}기본으로 쓰는 봇</h3>
+        ${x.bots.length ? `<div class="sbl">${x.bots.map(b => `<a href="#/b/${b.id}" class="sbr">${b.cover ? `<img src="/m/${h(b.cover)}" alt="" loading="lazy">` : `<span class="sph">${first(b.name)}</span>`}<span class="sbn">${h(b.name)}</span></a>`).join('')}</div>`
+          : '<p class="hint">봇 페이지 오른쪽에서 기본 페르소나로 정해 두면, 그 봇에 새로 올리는 채팅 로그에 이 페르소나가 붙어요.</p>'}</div>
+      ${x.memo ? `<div class="box"><h3>메모</h3><div class="memo-pre" style="max-height:none;-webkit-mask-image:none">${h(x.memo)}</div></div>` : ''}
+    </aside></div>
+  </div>`;
+  const reload = async d => { PX = d || await api('GET', `/api/personas/${x.id}`); drawPersona(); };
+  $('#pxBack').onclick = () => navStack.length > 1 ? history.back() : (location.hash = '#/personas');
+  $('#pxCopy').onclick = () => copyText(x.prompt, '프롬프트를 복사했어요');
+  if ($('#pxCp2')) $('#pxCp2').onclick = () => copyText(x.prompt, '프롬프트를 복사했어요');
+  $('#pxEdit').onclick = async () => { const d = await personaDialog(x); if (d) { await reload(d); loadState(); toast('저장했어요'); } };
+  $('#pxPng').onclick = async () => { try { saveBlob(await personaPng(x), fileSafe(x.name) + '.png'); } catch (e) { fail(e); } };
+  $('#pxDel').onclick = async () => {
+    const used = x.chats.length + x.bots.length;
+    if (!await confirmBox('페르소나 지우기', `<b>${h(x.name)}</b>을(를) 지울까요?${x.module ? ' 페르소나용 모듈도 함께 지워져요.' : ''}${used ? ` 이 페르소나를 쓰던 채팅 로그 ${x.chats.length}개 · 봇 ${x.bots.length}개는 '지정 안 함'이 돼요.` : ''} 되돌릴 수 없어요.`)) return;
+    try { await api('DELETE', `/api/personas/${x.id}`); PX = null; await loadState(); location.hash = '#/personas'; toast('지웠어요'); } catch (e) { fail(e); }
+  };
+  $('#pxMod').onclick = async () => {
+    const [f] = await pick('.risum');
+    if (!f) return;
+    const st = $('#pxModSt');
+    try { await reload(await putModule(x.id, f, k => { st.textContent = `올리는 중 ${Math.round(k * 100)}%`; })); toast('모듈을 올렸어요'); }
+    catch (e) { fail(e); st.textContent = ''; }
+  };
+  if ($('#pxModDel')) $('#pxModDel').onclick = async () => {
+    if (!await confirmBox('모듈 빼기', `<b>${h(x.module_name)}</b> 파일을 지울까요?`)) return;
+    try { await reload(await api('DELETE', `/api/personas/${x.id}/module`)); } catch (e) { fail(e); }
+  };
 }
 
 // ---- 자료함: 모듈·프리셋·로어북·플러그인 같은 자료를 봇처럼 카드로 (종류 칸 + 자료함 전용 폴더) ----
@@ -3718,6 +4016,8 @@ async function route() {
     if (r[0] === 'shelf') return await viewShelf(r[1]);
     if (r[0] === 'styles') return await viewStyles();
     if (r[0] === 's' && r[1]) return await viewStyle(+r[1]);
+    if (r[0] === 'personas') return await viewPersonas();
+    if (r[0] === 'p' && r[1]) return await viewPersona(+r[1]);
     replaceHash('#/');
   } catch (e) {
     $('#view').innerHTML = `<div class="wrap"><div class="empty"><h3>못 불러왔어요</h3><p>${h(e.message)}</p><a class="btn" href="#/">서재로</a></div></div>`;
