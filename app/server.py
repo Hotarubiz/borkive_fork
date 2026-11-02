@@ -118,8 +118,9 @@ DEFAULT_ITYPES = [("module", "모듈", "#B9A6F5"), ("preset", "프리셋", "#7FD
                   ("plugin", "플러그인", "#9CCB6E"), ("etc", "기타", "#C7C5CC")]  # 자료 종류 기본 (키 고정, etc는 지운 종류가 가는 곳)
 DEFAULT_STYPES = [("cel", "셀화", "#8FB8E8"), ("paint", "두꺼운 칠", "#C9A27A"), ("water", "수채", "#7FD1E8"),
                   ("semi", "반실사", "#E89BCB"), ("etc", "기타", "#C7C5CC")]  # 그림체 분류 기본 (etc는 지운 분류가 가는 곳)
-LABELS = {"statuses": ("상태", 12, "s"), "itypes": ("종류", 20, "t"), "stypes": ("분류", 20, "g")}  # 이름표 표: 부를 이름, 최대 개수, 더한 키 앞글자
-LABEL_MOVE = {"statuses": ("bots", "status", "later"), "itypes": ("bots", "itype", "etc"), "stypes": ("styles", "stype", "etc")}  # 지울 때 옮길 곳
+DEFAULT_PTYPES = [("male", "남캐", "#8FB8E8"), ("female", "여캐", "#E89BCB")]  # 페르소나 분류 기본 (지운 분류는 '분류 없음' = '')
+LABELS = {"statuses": ("상태", 12, "s"), "itypes": ("종류", 20, "t"), "stypes": ("분류", 20, "g"), "ptypes": ("분류", 20, "p")}  # 이름표 표: 부를 이름, 최대 개수, 더한 키 앞글자
+LABEL_MOVE = {"statuses": ("bots", "status", "later"), "itypes": ("bots", "itype", "etc"), "stypes": ("styles", "stype", "etc"), "ptypes": ("pgroups", "ptype", "")}  # 지울 때 옮길 곳
 STYLE_FIELDS = {"name": 200, "creator": 200, "source": 1000, "prompt": 20000, "negative": 20000, "memo": 20000}  # 글자 수 한도
 DEFAULT_STATUSES = [("playing", "하는 중", "#F2B655"), ("later", "찜", "#8FB8E8"), ("done", "끝", "#5EC2B7")]  # 키는 고정 (홈이 playing을 씀)
 KINDS = {"card", "module", "preset", "lore", "plugin", "images", "regex", "memo", "etc"}
@@ -185,6 +186,7 @@ CREATE TABLE IF NOT EXISTS personas (
   id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, image TEXT, prompt TEXT DEFAULT '', memo TEXT DEFAULT '',
   module TEXT, module_name TEXT, module_size INTEGER, created TEXT, updated TEXT, opened TEXT);
 CREATE TABLE IF NOT EXISTS pgroups (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, created TEXT, updated TEXT, opened TEXT);
+CREATE TABLE IF NOT EXISTS ptypes (key TEXT PRIMARY KEY, name TEXT NOT NULL, color TEXT, sort INTEGER DEFAULT 0, builtin INTEGER DEFAULT 0);
 """
 DEFAULT_FOLDERS = [("운영 봇", "#F2B655"), ("자작 봇", "#5EC2B7"), ("받은 봇", "#B9A6F5"), ("해 볼 것", "#8FB8E8")]
 DEFAULT_SHELVES = ["공용 모듈", "프롬프트 프리셋", "참고 그림"]
@@ -298,6 +300,11 @@ class DB:
             self.c.execute("ALTER TABLE personas ADD COLUMN group_id INTEGER")
             self.c.execute("ALTER TABLE personas ADD COLUMN label TEXT DEFAULT ''")
             self.c.execute("ALTER TABLE personas ADD COLUMN sort INTEGER DEFAULT 0")
+        if "ptype" not in [r["name"] for r in self.c.execute("PRAGMA table_info(pgroups)")]:  # 페르소나 분류 ('' = 분류 없음)
+            self.c.execute("ALTER TABLE pgroups ADD COLUMN ptype TEXT DEFAULT ''")
+        if not self.c.execute("SELECT 1 FROM ptypes LIMIT 1").fetchone():
+            for i, (k, n, col) in enumerate(DEFAULT_PTYPES):
+                self.c.execute("INSERT INTO ptypes(key, name, color, sort, builtin) VALUES (?,?,?,?,1)", (k, n, col, i))
         for r in self.c.execute("SELECT id, name, created, updated, opened FROM personas WHERE group_id IS NULL").fetchall():  # 폴더 없는 페르소나는 제 폴더를 하나씩
             gid = self.c.execute("INSERT INTO pgroups(name, created, updated, opened) VALUES (?,?,?,?)", (r["name"], r["created"], r["updated"], r["opened"])).lastrowid
             self.c.execute("UPDATE personas SET group_id=? WHERE id=?", (gid, r["id"]))
@@ -1125,7 +1132,7 @@ def persona_detail(id):
 
 
 def pgroup_rows():
-    return db.q("""SELECT g.id, g.name, g.created, g.updated, g.opened,
+    return db.q("""SELECT g.id, g.name, COALESCE(g.ptype, '') AS ptype, g.created, g.updated, g.opened,
                      (SELECT COUNT(*) FROM personas p WHERE p.group_id=g.id) AS nver,
                      (SELECT image FROM personas p WHERE p.group_id=g.id AND p.image IS NOT NULL ORDER BY p.sort, p.id LIMIT 1) AS image,
                      (SELECT group_concat(p.name || ' ' || COALESCE(p.label, ''), ' ') FROM personas p WHERE p.group_id=g.id) AS names,
@@ -1149,9 +1156,15 @@ def pgroup_ok(v):
     return v if isinstance(v, int) and not isinstance(v, bool) and db.q("SELECT 1 FROM pgroups WHERE id=?", (v,)) else None
 
 
-def pgroup_new(name):
+def ptype_ok(v):
+    """페르소나 분류 키 (없는 분류면 '' = 분류 없음)."""
+    return v if isinstance(v, str) and v and db.q("SELECT 1 FROM ptypes WHERE key=?", (v,)) else ""
+
+
+def pgroup_new(name, ptype=""):
     t = now()
-    gid, _ = db.x("INSERT INTO pgroups(name, created, updated, opened) VALUES (?,?,?,?)", ((name or "")[:100] or "이름 없는 페르소나", t, t, t))
+    gid, _ = db.x("INSERT INTO pgroups(name, ptype, created, updated, opened) VALUES (?,?,?,?,?)",
+                  ((name or "")[:100] or "이름 없는 페르소나", ptype_ok(ptype), t, t, t))
     return gid
 
 
@@ -1266,13 +1279,13 @@ def export_zip(out):
     """전부 내보내기를 zip으로 흘려보냄 (원본은 압축 없이 그대로 — 카드·그림은 이미 압축돼 있음)."""
     root = f"봇카이브 내보내기 {datetime.now(KST):%Y-%m-%d}"
     names = lambda t: {r["key"]: r["name"] for r in db.q(f"SELECT key, name FROM {t}")}
-    statuses, itypes, stypes = names("statuses"), names("itypes"), names("stypes")
+    statuses, itypes, stypes, ptypes = names("statuses"), names("itypes"), names("stypes"), names("ptypes")
     taken = {}  # 폴더 → 쓴 이름 (소문자)
     slot = lambda d, n: f"{d}/{free_name(safe_name(n, 'file'), taken.setdefault(d, set()))}"
     text = lambda arc, s: z.writestr(zipfile.ZipInfo(arc, time.localtime()[:6]), s, compress_type=zipfile.ZIP_DEFLATED)
     colors = {t: {r["key"]: r["color"] for r in db.q(f"SELECT key, color FROM {t}")} for t in LABELS}
     folders = {r["id"]: r for r in db.q("SELECT id, name, scope, color FROM folders ORDER BY sort, id")}
-    manifest = {"format": "botkive-export", "version": 1, "exported": now(), "statuses": statuses, "itypes": itypes, "stypes": stypes, "colors": colors,
+    manifest = {"format": "botkive-export", "version": 1, "exported": now(), "statuses": statuses, "itypes": itypes, "stypes": stypes, "ptypes": ptypes, "colors": colors,
                 "folders": [{"name": f["name"], "scope": f["scope"] or "bot", "color": f["color"]} for f in folders.values()], "bots": [], "styles": [], "personas": []}
     with zipfile.ZipFile(out, "w", allowZip64=True) as z:
         def media(arc, name):
@@ -1361,11 +1374,13 @@ def export_zip(out):
             linked = db.q("SELECT b.name, x.role FROM bot_styles x JOIN bots b ON b.id=x.bot_id WHERE x.style_id=?", (s["id"],))
             manifest["styles"].append({"name": s["name"], "dir": sdir[len(root) + 1:], "folders": [folders[i]["name"] for i in s["folders"] if i in folders], "bots": linked})
 
-        manifest["pgroups"] = [{k: g[k] for k in ("id", "name", "created")} for g in db.q("SELECT * FROM pgroups ORDER BY id")]
+        manifest["pgroups"] = [{k: g[k] for k in ("id", "name", "ptype", "created")} for g in db.q("SELECT * FROM pgroups ORDER BY id")]
+        gtype = {g["id"]: g["ptype"] for g in manifest["pgroups"]}
         gdirs, nver = {}, {r["group_id"]: r["n"] for r in db.q("SELECT group_id, COUNT(*) AS n FROM personas GROUP BY group_id")}
         for x in db.q("SELECT p.*, g.name AS group_name FROM personas p LEFT JOIN pgroups g ON g.id=p.group_id ORDER BY p.group_id, p.sort, p.id"):
             if x["group_id"] not in gdirs:
-                gdirs[x["group_id"]] = slot(f"{root}/페르소나", x["group_name"] or x["name"] or "페르소나")
+                pt = ptypes.get(gtype.get(x["group_id"]) or "")  # 분류가 있으면 페르소나/<분류>/<폴더>
+                gdirs[x["group_id"]] = slot(f"{root}/페르소나/{safe_name(pt)}" if pt else f"{root}/페르소나", x["group_name"] or x["name"] or "페르소나")
             pdir = slot(gdirs[x["group_id"]], x["label"] or x["name"] or "버전") if nver.get(x["group_id"], 0) > 1 else gdirs[x["group_id"]]  # 버전이 여럿이면 버전마다 폴더
             mp = {k: x[k] for k in ("id", "name", "label", "sort", "prompt", "memo", "created")} | {"group": x["group_id"], "dir": pdir[len(root) + 1:]}
             img = MEDIA / x["image"] if x["image"] and re.fullmatch(MEDIA_RE, x["image"]) else None
@@ -1532,6 +1547,7 @@ def _import_zip(z, job, made):
     key = lambda name, label, prompt: (name, label or "", prompt or "")
     same = {key(r["name"], r["label"], r["prompt"]): r["id"] for r in db.q("SELECT id, name, label, prompt FROM personas")}
     gname = {g.get("id"): txt(g.get("name"), 100) for g in lst(m.get("pgroups")) if isinstance(g, dict)}
+    gtype = {g.get("id"): g.get("ptype") for g in lst(m.get("pgroups")) if isinstance(g, dict)}
     gmap, gown = {}, {txt(r["name"], 100): r["id"] for r in db.q("SELECT id, name FROM pgroups ORDER BY id")}  # 이름이 같은 폴더가 있으면 그 폴더에 넣음
     for mp in lst(m.get("personas")):
         if not isinstance(mp, dict):
@@ -1548,7 +1564,7 @@ def _import_zip(z, job, made):
         if gk not in gmap:
             gn = (gname.get(g) if g is not None else None) or vals["name"]
             if gn not in gown:
-                gown[gn] = pgroup_new(gn)
+                gown[gn] = pgroup_new(gn, label("ptypes", gtype.get(g), "") if g is not None else "")
                 made["pgroups"].append(gown[gn])
             gmap[gk] = gown[gn]
         gid = gmap[gk]
@@ -2178,6 +2194,7 @@ def state():
                           FROM itypes t ORDER BY sort, key"""),
         "items": db.q("SELECT COUNT(*) AS n FROM bots WHERE COALESCE(itype, '') != ''")[0]["n"],
         "stypes": db.q("""SELECT t.*, (SELECT COUNT(*) FROM styles s WHERE s.stype=t.key) AS count FROM stypes t ORDER BY sort, key"""),
+        "ptypes": db.q("""SELECT t.*, (SELECT COUNT(*) FROM pgroups g WHERE g.ptype=t.key) AS count FROM ptypes t ORDER BY sort, key"""),
         "styles": db.q("SELECT COUNT(*) AS n FROM styles")[0]["n"],
         "personas": db.q("SELECT COUNT(*) AS n FROM pgroups")[0]["n"],
         "shelves": db.q("""SELECT s.*, (SELECT COUNT(*) FROM files f WHERE f.shelf_id=s.id AND f.bot_id IS NULL) AS count
@@ -2631,7 +2648,7 @@ class Handler(BaseHTTPRequestHandler):
                 vals.setdefault("name", "이름 없는 페르소나")
                 if d.get("image"):
                     vals["image"] = save_data_url(d["image"])
-                vals["group_id"] = pgroup_ok(d.get("group_id")) or pgroup_new(vals["name"])  # 폴더를 안 고르면 이름으로 새 폴더
+                vals["group_id"] = pgroup_ok(d.get("group_id")) or pgroup_new(vals["name"], d.get("ptype"))  # 폴더를 안 고르면 이름으로 새 폴더
                 vals["sort"] = pgroup_next(vals["group_id"])
                 vals["created"] = vals["updated"] = vals["opened"] = now()
                 pid, _ = db.x(f"INSERT INTO personas({', '.join(vals)}) VALUES ({','.join('?' * len(vals))})", tuple(vals.values()))
@@ -2905,7 +2922,7 @@ class Handler(BaseHTTPRequestHandler):
                 elif d.get("drop_image"):
                     vals["image"] = None
                 if "group_id" in d:  # 다른 폴더로 옮기기 (null = 이 버전만 새 폴더로)
-                    gid = pgroup_ok(d["group_id"]) or pgroup_new(vals.get("name") or old[0]["name"])
+                    gid = pgroup_ok(d["group_id"]) or pgroup_new(vals.get("name") or old[0]["name"], db.q("SELECT ptype FROM pgroups WHERE id=?", (old[0]["group_id"],))[0]["ptype"])
                     if gid != old[0]["group_id"]:
                         vals |= {"group_id": gid, "sort": pgroup_next(gid)}
                 if vals:
@@ -2922,6 +2939,8 @@ class Handler(BaseHTTPRequestHandler):
                     return self.send(404, {"error": "페르소나가 없어요"})
                 if name := str(d.get("name") or "").strip()[:100]:
                     db.x("UPDATE pgroups SET name=?, updated=? WHERE id=?", (name, now(), gid))
+                if "ptype" in d:
+                    db.x("UPDATE pgroups SET ptype=? WHERE id=?", (ptype_ok(d["ptype"]), gid))
                 if isinstance(d.get("order"), list):
                     for i, vid in enumerate(d["order"], 1):
                         if isinstance(vid, int):
