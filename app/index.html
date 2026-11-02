@@ -1941,7 +1941,7 @@ function drawAside() {
 // 탭(지금 버전의 카드+모듈 전부)과 파일 하나 들여다보기 창이 같은 그리기를 씀
 const PEEK_KINDS = ['card', 'module'];
 const peekFiles = v => B.files.filter(f => f.version_id === (v ? v.id : null) && PEEK_KINDS.includes(f.kind)).sort((a, b) => (a.kind === 'card' ? 0 : 1) - (b.kind === 'card' ? 0 : 1));
-const fbase = f => f.base || `/api/files/${f.id}`;  // 페르소나 모듈은 base로 따로
+const fbase = f => f.base || `/api/files/${f.id}`;  // 페르소나 자료는 base로 따로 (/api/pfiles/<id>)
 async function loreView(el, files) {
   el.innerHTML = '<p class="hint">파일에서 로어북을 읽는 중…</p>';
   const res = await Promise.all(files.map(f => api('GET', `${fbase(f)}/lore`).then(d => ({f, d}), e => ({f, err: e.message}))));
@@ -2569,7 +2569,7 @@ function fileRow(f, opts = {}) {
       ${f.note ? `<div class="note">${h(f.note)}</div>` : ''}</div>
     <div class="acts">
       ${PEEK_KINDS.includes(f.kind) ? `<button class="ib" data-fpeek aria-label="로어북·에셋 보기" title="로어북·에셋 보기">${ic('info', 17)}</button>` : ''}
-      <a class="ib" href="/f/${f.file}" aria-label="내려받기" title="내려받기">${ic('dl', 17)}</a>
+      <a class="ib" href="${h(opts.href || '/f/' + f.file)}" aria-label="내려받기" title="내려받기">${ic('dl', 17)}</a>
       <button class="ib" data-fe aria-label="고치기" title="이름·설명">${ic('edit', 16)}</button>
       <button class="ib" data-fd aria-label="지우기" title="지우기">${ic('trash', 16)}</button></div></div>`;
 }
@@ -3282,7 +3282,64 @@ async function personaPng(x) {
 // 페르소나 폴더 = 사람 하나, 그 안의 버전 = 탐험가용 · 헌터물 … (채팅 로그·봇은 버전을 가리킴)
 const pname = x => x.label ? `${x.name} · ${x.label}` : x.name;
 const verName = (x, g) => x.label || (g && x.name !== g.name ? x.name : '기본');
-const putModule = (pid, f, onProg) => putFile(`/api/personas/${pid}/module?name=${encodeURIComponent(f.name)}`, f, onProg);
+const putPfile = (gid, pid, f, kind, onProg) => putFile(`/api/pgroups/${gid}/files?persona=${pid || ''}&kind=${kind || ''}&name=${encodeURIComponent(f.name)}`, f, onProg);
+const pfBase = f => ({...f, base: `/api/pfiles/${f.id}`});
+// 페르소나 자료실: 봇 자료실처럼 이 버전 자료 + 폴더 공통 자료 (모듈 · 프리셋 · 무엇이든)
+function pfilesView(el, g, x, after) {
+  const solo = g.versions.length === 1;
+  const mine = g.files.filter(f => f.persona_id === x.id), common = g.files.filter(f => !f.persona_id);
+  const groups = Object.keys(KIND).map(k => [k, common.filter(f => f.kind === k)]).filter(y => y[1].length);
+  const row = f => fileRow(f, {href: `/api/pfiles/${f.id}`});
+  el.innerHTML = `<div class="box"><h3>${solo ? '자료' : `${h(verName(x, g))} 버전 자료`}<span class="meta" style="font-weight:400">${solo ? '이 페르소나와 같이 쓰는 모듈 · 프리셋 · 무엇이든' : '이 버전에서만 쓰는 것'}</span></h3>
+      ${mine.length ? `<div class="files">${mine.map(row).join('')}</div>` : ''}
+      <div class="drop${mine.length ? ' sm' : ''}" data-pdrop="${x.id}" tabindex="0" role="button" style="${mine.length ? 'margin-top:10px' : ''}"><b>파일 끌어다 놓기 / 눌러서 고르기</b><span>.risum은 모듈, .risup는 프리셋으로 알아서 분류해요</span></div></div>
+    ${solo && !common.length ? '' : `<div class="box" style="margin-top:22px"><h3>폴더 공통 자료<span class="meta" style="font-weight:400">버전과 상관없이 같이 쓰는 것 — 공용 모듈, 프리셋, 참고 파일 등</span></h3>
+      <div class="drop sm" data-pdrop="" tabindex="0" role="button"><b>파일 끌어다 놓기 / 눌러서 고르기</b><span>${solo ? '' : '모든 버전에서 보여요'}</span></div>
+      ${groups.map(([k, fs]) => `<p class="ktitle">${KIND[k]} ${fs.length}</p><div class="files">${fs.map(row).join('')}</div>`).join('')}</div>`}`;
+  $$('.fr', el).forEach(r => {
+    const f = g.files.find(y => y.id === +r.dataset.id);
+    if ($('[data-fpeek]', r)) $('[data-fpeek]', r).onclick = () => peekDialog(pfBase(f));
+    $('[data-fe]', r).onclick = () => pfileDialog(f, g, after);
+    $('[data-fd]', r).onclick = async () => {
+      if (!await confirmBox('파일 지우기', `<b>${h(f.name)}</b>을(를) 지울까요?`)) return;
+      try { await api('DELETE', `/api/pfiles/${f.id}`); after(); } catch (e) { fail(e); }
+    };
+  });
+  $$('[data-pdrop]', el).forEach(dz => {
+    const go = async fs => {
+      if (!fs.length) return;
+      const list = await sortFiles(fs), t = document.createElement('div');
+      t.className = 'toast'; document.body.append(t);
+      try {
+        for (const [i, y] of list.entries()) {
+          const label = `올리는 중 ${i + 1}/${list.length} · ${y.file.name}`;
+          t.textContent = label;
+          await putPfile(g.id, +dz.dataset.pdrop || null, y.file, y.kind, k => t.textContent = `${label} ${Math.round(k * 100)}%`);
+        }
+        t.remove(); toast(`${list.length}개 올렸어요`);
+      } catch (e) { t.remove(); fail(e); }
+      after();
+    };
+    dz.onclick = async () => go(await pick('', true));
+    dz.onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); dz.click(); } };
+    dropZone(dz, go);
+  });
+}
+function pfileDialog(f, g, after) {
+  const m = modal(`<header><h2>파일 고치기</h2>${xBtn}</header>
+    <div class="bd">
+      <label class="field">이름<input class="inp" id="fn" value="${h(f.name)}"></label>
+      <label class="field">종류<select class="inp" id="fk">${Object.entries(KIND).map(([k, v]) => `<option value="${k}" ${k === f.kind ? 'selected' : ''}>${v}</option>`).join('')}</select></label>
+      <label class="field">어느 버전<select class="inp" id="fv"><option value="">폴더 공통 (버전 상관없이)</option>
+        ${g.versions.map(v => `<option value="${v.id}" ${v.id === f.persona_id ? 'selected' : ''}>${h(verName(v, g))}</option>`).join('')}</select></label>
+      <label class="field">설명<textarea class="inp" id="fnote" placeholder="어디에 쓰는 파일인지, 몇 버전인지">${h(f.note || '')}</textarea></label>
+    </div>
+    <footer><span class="note"></span><button class="btn" data-close>취소</button><button class="btn pri" data-ok>저장</button></footer>`, 'narrow');
+  $('[data-ok]', m).onclick = async () => {
+    const v = {name: $('#fn', m).value, kind: $('#fk', m).value, note: $('#fnote', m).value, persona_id: +$('#fv', m).value || null};
+    try { await api('PUT', `/api/pfiles/${f.id}`, v); m.close(); after(); } catch (e) { fail(e); }
+  };
+}
 // 버전 만들기·고치기 창. opts.group = 넣을 폴더 id · opts.from = 내용을 가져올 수 있는 버전 · opts.g = 그 폴더
 async function personaDialog(p, opts = {}) {
   let groups = [];
@@ -3358,7 +3415,7 @@ async function personaDialog(p, opts = {}) {
       const btn = $('[data-ok]', m); btn.disabled = true;
       try {
         let x = p ? await api('PUT', `/api/personas/${p.id}`, body) : await api('POST', '/api/personas', body);
-        if (mod) { btn.textContent = '모듈 올리는 중…'; x = await putModule(x.id, mod, k => { btn.textContent = `모듈 올리는 중 ${Math.round(k * 100)}%`; }); }
+        if (mod) { btn.textContent = '모듈 올리는 중…'; await putPfile(x.group_id, x.id, mod, 'module', k => { btn.textContent = `모듈 올리는 중 ${Math.round(k * 100)}%`; }); }
         m.onclose = null; m.close(); res(x);
       } catch (e) { fail(e); btn.disabled = false; btn.textContent = p ? '저장' : '만들기'; }
     };
@@ -3498,7 +3555,7 @@ function personaCopyDialog(x, g) {
         <label class="field">새 버전 이름<input class="inp" id="pcLabel" maxlength="60" value="${h(`${verName(x, g)} 사본`)}"></label>
         <div class="field">넣을 곳<div class="seg" id="pcTo"><button type="button" class="pill" data-to="here" aria-pressed="true">이 폴더</button>
           <button type="button" class="pill" data-to="new" aria-pressed="false">새 폴더로 (${h(g.name)} 사본)</button></div></div>
-        <p class="hint" style="margin:0">프롬프트 · 메모 · 그림${x.module ? ' · 모듈' : ''}까지 똑같이 만들어요. 채팅 로그와 기본 봇은 따라가지 않아요.</p>
+        <p class="hint" style="margin:0">프롬프트 · 메모 · 그림${g.files.some(f => f.persona_id === x.id) ? ' · 버전 자료' : ''}까지 똑같이 만들어요. 채팅 로그와 기본 봇은 따라가지 않아요.</p>
       </div>
       <footer><span class="note"></span><button class="btn" data-close>취소</button><button class="btn pri" data-ok>복제</button></footer>`, 'narrow');
     m.onclose = () => res(null);
@@ -3616,8 +3673,10 @@ async function viewPersona(gid, vid) {
 }
 function drawPersona(vid) {
   const g = GX, x = g.versions.find(v => v.id === vid) || g.versions[0];
-  let sub = location.hash.split('/')[4] || 'main';  // 버전 안 하위 탭: main(프롬프트) · module · lore · assets · gallery
-  if ((sub === 'lore' || sub === 'assets') && !x.module || !['main', 'module', 'lore', 'assets', 'gallery'].includes(sub)) sub = 'main';
+  let sub = location.hash.split('/')[4] || 'main';  // 버전 안 하위 탭: main(프롬프트) · files(자료실) · lore · assets · gallery
+  const myFiles = g.files.filter(f => !f.persona_id || f.persona_id === x.id), peek = myFiles.filter(f => PEEK_KINDS.includes(f.kind)).map(pfBase);
+  if (sub === 'module') sub = 'files';  // 예전 주소
+  if ((sub === 'lore' || sub === 'assets') && !peek.length || !['main', 'files', 'lore', 'assets', 'gallery'].includes(sub)) sub = 'main';
   const subUrl = (v, t = sub) => `#/p/${g.id}/${v.id}${t === 'main' ? '' : '/' + t}`;
   const nChats = g.versions.reduce((n, v) => n + v.chats.length, 0), nBots = g.versions.reduce((n, v) => n + v.bots.length, 0);
   $('#view').innerHTML = `<div class="wrap">
@@ -3639,17 +3698,11 @@ function drawPersona(vid) {
       <button class="vadd" id="pgAdd" title="이 폴더에 버전 하나 더">${ic('plus', 14)}버전</button></nav>
     <div class="itabs" role="tablist" aria-label="이 버전">
       <button role="tab" data-sub="main" aria-selected="${sub === 'main'}">프롬프트</button>
-      <button role="tab" data-sub="module" aria-selected="${sub === 'module'}">${ic('puzzle', 14)}모듈<span class="meta">${x.module ? 1 : ''}</span></button>
-      ${x.module ? `<button role="tab" data-sub="lore" aria-selected="${sub === 'lore'}">${ic('book', 14)}로어북</button>
+      <button role="tab" data-sub="files" aria-selected="${sub === 'files'}">${ic('folder', 14)}자료실<span class="meta">${myFiles.length || ''}</span></button>
+      ${peek.length ? `<button role="tab" data-sub="lore" aria-selected="${sub === 'lore'}">${ic('book', 14)}로어북</button>
       <button role="tab" data-sub="assets" aria-selected="${sub === 'assets'}">${ic('img', 14)}에셋</button>` : ''}
       <button role="tab" data-sub="gallery" aria-selected="${sub === 'gallery'}">${ic('img', 14)}갤러리<span class="meta">${g.images.filter(i => !i.persona_id || i.persona_id === x.id).length || ''}</span></button></div>
-    ${sub === 'module' ? `<div class="box" style="max-width:640px"><h3>${ic('puzzle', 16)}페르소나용 모듈</h3>
-        ${x.module ? `<div class="pmod"><span class="fi">RISUM</span><div style="min-width:0;flex:1"><b style="display:block">${h(x.module_name)}</b><span class="meta">${size(x.module_size)}</span></div></div>
-          <div class="row" style="margin-top:12px"><a class="btn sm" href="/api/personas/${x.id}/module" download>${ic('dl', 15)}내려받기</a>
-            <button class="btn sm ghost" id="pxMod">바꾸기</button><button class="btn sm ghost danger" id="pxModDel">빼기</button></div>
-          <p class="hint" style="margin:12px 0 0">모듈 안의 로어북 · 에셋은 옆 탭에서 볼 수 있어요.</p>`
-          : `<p class="hint">이 버전과 같이 쓰는 모듈(.risum)이 있으면 올려 두세요. 올리면 로어북 · 에셋 탭이 생겨요.</p><button class="btn sm" id="pxMod">${ic('plus', 15)}모듈 올리기</button>`}
-        <p class="meta" id="pxModSt" style="margin:8px 0 0"></p></div>` : sub !== 'main' ? '<div id="pxSub"></div>' : ''}
+    ${sub !== 'main' ? '<div id="pxSub"></div>' : ''}
     <div class="cols"${sub === 'main' ? '' : ' hidden'}><div style="min-width:0;display:flex;flex-direction:column;gap:18px">
       <div class="box"><h3>프롬프트<span class="meta" style="font-weight:500">리스 이름 ${h(x.name)}</span>${x.prompt ? `<button class="ib" id="pxCp2" aria-label="프롬프트 복사" title="복사">${ic('copy', 16)}</button>` : ''}</h3>
         ${x.prompt ? `<pre class="sprm" style="font:14px/1.7 var(--body);max-height:480px">${h(x.prompt)}</pre>` : '<p class="hint">아직 프롬프트가 없어요. 고치기에서 넣어 주세요.</p>'}</div>
@@ -3680,9 +3733,10 @@ function drawPersona(vid) {
     onItems: items => { g.images = items; },
     coverLabel: `'${verName(x, g)}' 그림으로`,
     cover: async i => { await api('PUT', `/api/personas/${x.id}`, {image: await blobData(i.image)}); toast('그림을 바꿨어요'); await reload(); }});
+  else if (sub === 'files') pfilesView($('#pxSub'), g, x, () => reload());
   else if (sub === 'lore' || sub === 'assets') {
-    const mf = {id: 0, name: x.module_name, kind: 'module', base: `/api/personas/${x.id}/module`};
-    (sub === 'lore' ? loreView : assetView)($('#pxSub'), [mf]);
+    $('#pxSub').innerHTML = `${peek.length > 1 ? `<p class="meta" style="margin:0 0 14px">${peek.map(f => `${f.persona_id ? '' : '공통 · '}${h(f.name)}`).join(' · ')}</p>` : ''}<div id="pxPk"></div>`;
+    (sub === 'lore' ? loreView : assetView)($('#pxPk'), peek);
   }
   const moved = async d => {  // 고치다가 다른 폴더로 옮겼으면 그 폴더로
     if (d.group_id !== g.id) { await loadState(); location.hash = `#/p/${d.group_id}/${d.id}`; } else await reload(d.id);
@@ -3734,24 +3788,13 @@ function drawPersona(vid) {
   };
   $('#pxDel').onclick = async () => {
     const used = x.chats.length + x.bots.length, last = g.versions.length === 1;
-    if (!await confirmBox(last ? '페르소나 지우기' : '버전 지우기', `<b>${h(last ? g.name : verName(x, g))}</b>${last ? '' : ' 버전'}을(를) 지울까요?${x.module ? ' 페르소나용 모듈도 함께 지워져요.' : ''}${used ? ` 이 버전을 쓰던 채팅 로그 ${x.chats.length}개 · 봇 ${x.bots.length}개는 '지정 안 함'이 돼요.` : ''} 되돌릴 수 없어요.`)) return;
+    if (!await confirmBox(last ? '페르소나 지우기' : '버전 지우기', `<b>${h(last ? g.name : verName(x, g))}</b>${last ? '' : ' 버전'}을(를) 지울까요?${g.files.some(f => f.persona_id === x.id) ? ` 이 버전 자료 ${g.files.filter(f => f.persona_id === x.id).length}개도 함께 지워져요.` : ''}${used ? ` 이 버전을 쓰던 채팅 로그 ${x.chats.length}개 · 봇 ${x.bots.length}개는 '지정 안 함'이 돼요.` : ''} 되돌릴 수 없어요.`)) return;
     try {
       const r = await api('DELETE', `/api/personas/${x.id}`);
       await loadState();
       if (r.group) { await reload(-1); } else { GX = null; location.hash = '#/personas'; }
       toast('지웠어요');
     } catch (e) { fail(e); }
-  };
-  if ($('#pxMod')) $('#pxMod').onclick = async () => {
-    const [f] = await pick('.risum');
-    if (!f) return;
-    const st = $('#pxModSt');
-    try { await putModule(x.id, f, k => { st.textContent = `올리는 중 ${Math.round(k * 100)}%`; }); await reload(); toast('모듈을 올렸어요'); }
-    catch (e) { fail(e); st.textContent = ''; }
-  };
-  if ($('#pxModDel')) $('#pxModDel').onclick = async () => {
-    if (!await confirmBox('모듈 빼기', `<b>${h(x.module_name)}</b> 파일을 지울까요?`)) return;
-    try { await api('DELETE', `/api/personas/${x.id}/module`); await reload(); } catch (e) { fail(e); }
   };
 }
 

@@ -34,9 +34,9 @@ API (JSON):
   GET    /api/files?all=1   PUT|DELETE /api/files/<id>
   GET    /api/chats?bot=    POST /api/chats    GET|PUT|DELETE /api/chats/<id>   (persona_id: null = 지정 안 함, POST에서 빼면 봇의 기본 페르소나)
   GET    /api/personas   POST /api/personas {group_id?, name, label, prompt, memo, image(data URL)}   GET|PUT|DELETE /api/personas/<id> (PUT drop_image, group_id)
-  GET|PUT|DELETE /api/personas/<id>/module?name=   페르소나용 모듈(.risum) 하나 (PUT은 본문 그대로)
-  POST   /api/personas/<id>/copy {label, group_id: 빼면 같은 폴더 · null이면 새 폴더}   버전 복제 (그림·모듈도 새 파일로)
-  GET    /api/personas/<id>/module/lore|assets   GET /api/personas/<id>/module/masset/<n>   페르소나 모듈 로어북 · 에셋 (봇 파일과 같은 모양)
+  POST   /api/personas/<id>/copy {label, group_id: 빼면 같은 폴더 · null이면 새 폴더}   버전 복제 (그림·자료도 새 파일로)
+  PUT    /api/pgroups/<id>/files?name=&persona=(빈칸 = 폴더 공통)&kind=   페르소나 자료실에 파일 원본(본문 그대로)
+  GET|PUT|DELETE /api/pfiles/<id> (PUT {name, kind, note, persona_id})   GET /api/pfiles/<id>/lore|assets|asset/<n>|masset/<n>   로어북 · 에셋 (봇 파일과 같은 모양)
   GET    /api/pgroups   GET|PUT|DELETE /api/pgroups/<id>   PUT {name, ptype, order: [버전 id…]}
   POST   /api/pgroups/<id>/images {image(data URL), persona_id(null = 폴더 공통), memo}   PUT|DELETE /api/pimages/<id> {memo, persona_id}   갤러리
          페르소나 = 폴더(사람 하나) 안의 버전들. 버전 = 그림 한 장 + 프롬프트 + 메모. 봇의 기본 페르소나는 PUT /api/bots/<id> {persona_id, fill_chats}
@@ -200,6 +200,9 @@ CREATE TABLE IF NOT EXISTS pgroups (id INTEGER PRIMARY KEY AUTOINCREMENT, name T
 CREATE TABLE IF NOT EXISTS pimages (id INTEGER PRIMARY KEY AUTOINCREMENT, group_id INTEGER REFERENCES pgroups(id) ON DELETE CASCADE,
   persona_id INTEGER, image TEXT NOT NULL, memo TEXT DEFAULT '', created TEXT);
 CREATE INDEX IF NOT EXISTS pimages_group ON pimages(group_id);
+CREATE TABLE IF NOT EXISTS pfiles (id INTEGER PRIMARY KEY AUTOINCREMENT, group_id INTEGER REFERENCES pgroups(id) ON DELETE CASCADE,
+  persona_id INTEGER, kind TEXT DEFAULT 'etc', name TEXT, note TEXT DEFAULT '', path TEXT, size INTEGER, created TEXT);
+CREATE INDEX IF NOT EXISTS pfiles_group ON pfiles(group_id);
 CREATE TABLE IF NOT EXISTS ptypes (key TEXT PRIMARY KEY, name TEXT NOT NULL, color TEXT, sort INTEGER DEFAULT 0, builtin INTEGER DEFAULT 0);
 """
 DEFAULT_FOLDERS = [("운영 봇", "#F2B655"), ("자작 봇", "#5EC2B7"), ("받은 봇", "#B9A6F5"), ("해 볼 것", "#8FB8E8")]
@@ -325,6 +328,10 @@ class DB:
         for r in self.c.execute("SELECT id, name, created, updated, opened FROM personas WHERE group_id IS NULL").fetchall():  # 폴더 없는 페르소나는 제 폴더를 하나씩
             gid = self.c.execute("INSERT INTO pgroups(name, created, updated, opened) VALUES (?,?,?,?)", (r["name"], r["created"], r["updated"], r["opened"])).lastrowid
             self.c.execute("UPDATE personas SET group_id=? WHERE id=?", (gid, r["id"]))
+        for r in self.c.execute("SELECT id, group_id, module, module_name, module_size, updated FROM personas WHERE module IS NOT NULL").fetchall():  # 버전마다 모듈 하나 → 자료실
+            self.c.execute("INSERT INTO pfiles(group_id, persona_id, kind, name, path, size, created) VALUES (?,?,'module',?,?,?,?)",
+                           (r["group_id"], r["id"], r["module_name"] or r["module"].rsplit("/", 1)[-1], r["module"], r["module_size"], r["updated"]))
+            self.c.execute("UPDATE personas SET module=NULL, module_name=NULL, module_size=NULL WHERE id=?", (r["id"],))
         if "path" not in [r["name"] for r in self.c.execute("PRAGMA table_info(files)")]:  # 디스크 자리 (data 기준), moving = 옮기는 중인 예전 자리
             self.c.execute("ALTER TABLE files ADD COLUMN path TEXT")
             self.c.execute("ALTER TABLE files ADD COLUMN moving TEXT")
@@ -505,7 +512,7 @@ def file_home(f):
 
 def fpath(token):
     """파일 토큰 → 디스크 경로 (옮기는 사이에는 예전 자리)."""
-    if token.startswith("pm:"):  # 페르소나 모듈 (persona_module_token)
+    if token.startswith("pm:"):  # 페르소나 자료 (pfile_token)
         return DATA / token[3:].split("?", 1)[0]
     r = db.q("SELECT path, moving FROM files WHERE file=?", (token,))
     if not r or not r[0]["path"]:
@@ -1228,7 +1235,7 @@ def pgroup_rows():
                      (SELECT image FROM personas p WHERE p.group_id=g.id AND p.image IS NOT NULL ORDER BY p.sort, p.id LIMIT 1) AS image,
                      (SELECT group_concat(p.name || ' ' || COALESCE(p.label, ''), ' ') FROM personas p WHERE p.group_id=g.id) AS names,
                      (SELECT group_concat(COALESCE(p.label, ''), char(31)) FROM (SELECT label FROM personas WHERE group_id=g.id ORDER BY sort, id) p) AS labels,
-                     EXISTS(SELECT 1 FROM personas p WHERE p.group_id=g.id AND p.module IS NOT NULL) AS has_module,
+                     EXISTS(SELECT 1 FROM pfiles f WHERE f.group_id=g.id AND f.kind='module') AS has_module,
                      (SELECT COUNT(*) FROM chats c JOIN personas p ON p.id=c.persona_id WHERE p.group_id=g.id) AS nchats,
                      (SELECT COUNT(*) FROM bots b JOIN personas p ON p.id=b.persona_id WHERE p.group_id=g.id) AS nbots
                    FROM pgroups g ORDER BY COALESCE(g.opened, g.updated) DESC""")
@@ -1241,13 +1248,61 @@ def pgroup_detail(gid):
     g = g[0]
     g["versions"] = [persona_detail(r["id"]) for r in db.q("SELECT id FROM personas WHERE group_id=? ORDER BY sort, id", (gid,))]
     g["images"] = pimage_rows(gid)
+    g["files"] = pfile_rows(gid)
     return g
 
 
-def persona_module_token(x):
-    """페르소나 모듈을 봇 파일처럼 들여다볼 때 쓰는 토큰 (바꿔 올리면 캐시가 안 섞이게 수정 시각을 붙임)."""
-    f = DATA / x["module"] if x["module"] else None
-    return f"pm:{x['module']}?{f.stat().st_mtime_ns}" if f and f.is_file() else None
+def pfile_token(path):
+    """페르소나 자료를 봇 파일처럼 들여다볼 때 쓰는 토큰 (바꿔 올리면 캐시가 안 섞이게 수정 시각을 붙임)."""
+    f = DATA / path if path else None
+    return f"pm:{path}?{f.stat().st_mtime_ns}" if f and f.is_file() else None
+
+
+def pfile_rows(gid):
+    return db.q("SELECT id, persona_id, kind, name, note, size, created FROM pfiles WHERE group_id=? ORDER BY created, id", (gid,))
+
+
+def pfile_home(gid, pid):
+    """버전 자료는 personas/<버전>, 폴더 공통은 personas/g<폴더>."""
+    return persona_home(pid) if pid else f"personas/g{gid:04d}"
+
+
+def pfile_kind(kind, name):
+    if kind in KINDS:
+        return kind
+    n = (name or "").lower()
+    return "module" if n.endswith(".risum") else "preset" if n.endswith((".risup", ".risupreset")) else "lore" if n.endswith(".risulore") else "etc"
+
+
+def add_pfile(gid, pid, src, name, size, kind="", note="", created=None):
+    """받아 둔 파일(src)을 자료실 자리로 옮김."""
+    d = DATA / pfile_home(gid, pid)
+    d.mkdir(parents=True, exist_ok=True)
+    dest = d / free_name(safe_name(name, "file"), d)
+    os.replace(src, dest)
+    fid, _ = db.x("INSERT INTO pfiles(group_id, persona_id, kind, name, note, path, size, created) VALUES (?,?,?,?,?,?,?,?)",
+                  (gid, pid, pfile_kind(kind, name), name[:200], (note or "")[:2000], dest.relative_to(DATA).as_posix(), size, created or now()))
+    return fid
+
+
+def move_pfile(fid, gid, pid):
+    """버전 ↔ 폴더 공통으로 옮기면 디스크 자리도 따라감."""
+    r = db.q("SELECT path FROM pfiles WHERE id=?", (fid,))[0]
+    src, d = DATA / r["path"], DATA / pfile_home(gid, pid)
+    path = r["path"]
+    if src.is_file() and src.parent != d:
+        d.mkdir(parents=True, exist_ok=True)
+        dest = d / free_name(src.name, d)
+        os.replace(src, dest)
+        prune(src.parent)
+        path = dest.relative_to(DATA).as_posix()
+    db.x("UPDATE pfiles SET group_id=?, persona_id=?, path=? WHERE id=?", (gid, pid, path, fid))
+
+
+def drop_pfiles(where, arg):
+    for r in db.q(f"SELECT path FROM pfiles WHERE {where}", (arg,)):
+        drop_path(r["path"])
+    db.x(f"DELETE FROM pfiles WHERE {where}", (arg,))
 
 
 def pimage_rows(gid):
@@ -1280,6 +1335,7 @@ def pgroup_prune(gid):
     if gid and not db.q("SELECT 1 FROM personas WHERE group_id=? LIMIT 1", (gid,)):
         imgs = [r["image"] for r in db.q("SELECT image FROM pimages WHERE group_id=?", (gid,))]
         db.x("DELETE FROM pimages WHERE group_id=?", (gid,))
+        drop_pfiles("group_id=?", gid)
         db.x("DELETE FROM pgroups WHERE id=?", (gid,))
         drop_media(*imgs)
 
@@ -1296,29 +1352,11 @@ def persona_ok(v):
     return v if isinstance(v, int) and not isinstance(v, bool) and db.q("SELECT 1 FROM personas WHERE id=?", (v,)) else None
 
 
-def drop_persona_module(pid):
-    r = db.q("SELECT module FROM personas WHERE id=?", (pid,))
-    if r and r[0]["module"]:
-        drop_path(r[0]["module"])
-    db.x("UPDATE personas SET module=NULL, module_name=NULL, module_size=NULL WHERE id=?", (pid,))
-
-
-def set_persona_module(pid, src, name, size):
-    """받아 둔 파일(src)을 그 페르소나 폴더로 옮기고 예전 모듈은 지움."""
-    drop_persona_module(pid)
-    d = DATA / persona_home(pid)
-    d.mkdir(parents=True, exist_ok=True)
-    dest = d / free_name(safe_name(name, "module.risum"), d)
-    os.replace(src, dest)
-    db.x("UPDATE personas SET module=?, module_name=?, module_size=?, updated=? WHERE id=?",
-         (dest.relative_to(DATA).as_posix(), name, size, now(), pid))
-
-
 def drop_persona(pid):
     r = db.q("SELECT image, group_id FROM personas WHERE id=?", (pid,))
     if not r:
         return
-    drop_persona_module(pid)
+    drop_pfiles("persona_id=?", pid)  # 버전 자료는 같이 지움 (봇 버전처럼)
     db.x("UPDATE chats SET persona_id=NULL WHERE persona_id=?", (pid,))
     db.x("UPDATE bots SET persona_id=NULL WHERE persona_id=?", (pid,))
     db.x("UPDATE pimages SET persona_id=NULL WHERE persona_id=?", (pid,))
@@ -1329,7 +1367,7 @@ def drop_persona(pid):
 
 
 def copy_persona(pid, label, gid):
-    """버전 복제: 글 · 그림 · 모듈까지 새 파일로. gid가 None이면 새 폴더(같은 분류, 이름 뒤에 '사본')."""
+    """버전 복제: 글 · 그림 · 버전 자료까지 새 파일로. gid가 None이면 새 폴더(같은 분류, 이름 뒤에 '사본')."""
     x = db.q("SELECT p.*, g.name AS group_name, g.ptype FROM personas p LEFT JOIN pgroups g ON g.id=p.group_id WHERE p.id=?", (pid,))[0]
     if gid is None:
         gid = pgroup_new(f"{x['group_name'] or x['name']} 사본", x["ptype"])
@@ -1340,11 +1378,12 @@ def copy_persona(pid, label, gid):
     t = now()
     nid, _ = db.x("""INSERT INTO personas(name, label, prompt, memo, image, group_id, sort, created, updated, opened) VALUES (?,?,?,?,?,?,?,?,?,?)""",
                   (x["name"], label[:60], x["prompt"], x["memo"], img, gid, pgroup_next(gid), t, t, t))
-    if x["module"] and (DATA / x["module"]).is_file():
-        TMP.mkdir(exist_ok=True)
-        tmp = TMP / (secrets.token_hex(12) + ".part")
-        shutil.copyfile(DATA / x["module"], tmp)
-        set_persona_module(nid, tmp, x["module_name"] or "module.risum", tmp.stat().st_size)
+    for f in db.q("SELECT * FROM pfiles WHERE persona_id=? ORDER BY id", (pid,)):
+        if (DATA / f["path"]).is_file():
+            TMP.mkdir(exist_ok=True)
+            tmp = TMP / (secrets.token_hex(12) + ".part")
+            shutil.copyfile(DATA / f["path"], tmp)
+            add_pfile(gid, nid, tmp, f["name"], tmp.stat().st_size, f["kind"], f["note"])
     return nid
 
 
@@ -1525,10 +1564,12 @@ def export_zip(out):
                 mp["image"] = arc.rsplit("/", 1)[1]
             lines = [f"이름: {x['name']}"] + ([f"버전: {x['label']}"] if x["label"] else []) + ["", "프롬프트", x["prompt"] or ""] + (["", "메모", x["memo"].strip()] if (x["memo"] or "").strip() else [])
             text(slot(pdir, "프롬프트.txt"), "\n".join(lines) + "\n")
-            if x["module"] and (DATA / x["module"]).is_file():
-                arc = slot(pdir, x["module_name"] or "module.risum")
-                z.write(DATA / x["module"], arc, compress_type=zipfile.ZIP_STORED)
-                mp["module"], mp["module_name"] = arc.rsplit("/", 1)[1], x["module_name"]
+            mp["files"] = []
+            for f in db.q("SELECT * FROM pfiles WHERE persona_id=? ORDER BY id", (x["id"],)):
+                if (DATA / f["path"]).is_file():
+                    arc = slot(pdir, f["name"] or "file")
+                    z.write(DATA / f["path"], arc, compress_type=zipfile.ZIP_STORED)
+                    mp["files"].append({"file": arc[len(pdir) + 1:], "name": f["name"], "kind": f["kind"], "note": f["note"] or "", "created": f["created"]})
             manifest["personas"].append(mp)
         for g in manifest["pgroups"]:  # 갤러리: 폴더 아래 '갤러리' (버전 전용이면 그 버전 id)
             g["images"] = []
@@ -1538,6 +1579,12 @@ def export_zip(out):
                     arc = slot(f"{gdirs[g['id']]}/갤러리", f"{len(g['images']) + 1:03d}.{r['image'].rsplit('.', 1)[1]}")
                     z.write(f, arc, compress_type=zipfile.ZIP_STORED)
                     g["images"].append({"file": arc[len(root) + 1:], "persona": r["persona_id"], "memo": r["memo"] or "", "created": r["created"]})
+            g["files"] = []  # 폴더 공통 자료
+            for f in db.q("SELECT * FROM pfiles WHERE group_id=? AND persona_id IS NULL ORDER BY id", (g["id"],)):
+                if g["id"] in gdirs and (DATA / f["path"]).is_file():
+                    arc = slot(f"{gdirs[g['id']]}/공통 자료", f["name"] or "file")
+                    z.write(DATA / f["path"], arc, compress_type=zipfile.ZIP_STORED)
+                    g["files"].append({"file": arc[len(root) + 1:], "name": f["name"], "kind": f["kind"], "note": f["note"] or "", "created": f["created"]})
         text(f"{root}/읽어 주세요.txt", EXPORT_README)
         text(f"{root}/봇카이브.json", json.dumps(manifest, ensure_ascii=False, indent=1))
 
@@ -1715,11 +1762,16 @@ def _import_zip(z, job, made):
         pid, _ = db.x(f"INSERT INTO personas({', '.join(vals)}) VALUES ({','.join('?' * len(vals))})", tuple(vals.values()))
         made["personas"].append(pid)
         same[k] = pid
-        if info := ent(f"{pd}/{mp.get('module')}") if mp.get("module") else None:
-            TMP.mkdir(exist_ok=True)
-            tmp = TMP / secrets.token_hex(12)
-            take(info, tmp)
-            set_persona_module(pid, tmp, re.sub(r'[\x00-\x1f/\\]', "_", txt(mp.get("module_name"), 200) or str(mp["module"]))[:200], info.file_size)
+        fl = [f for f in lst(mp.get("files")) if isinstance(f, dict)]
+        if mp.get("module"):  # 예전 내보내기: 버전마다 모듈 하나
+            fl.append({"file": mp["module"], "name": mp.get("module_name"), "kind": "module"})
+        for f in fl:
+            if info := ent(f"{pd}/{txt(f.get('file'), 2000)}"):
+                TMP.mkdir(exist_ok=True)
+                tmp = TMP / secrets.token_hex(12)
+                take(info, tmp)
+                nm = re.sub(r'[\x00-\x1f/\\]', "_", txt(f.get("name"), 200) or str(f.get("file")).rsplit("/", 1)[-1])[:200]
+                add_pfile(gid, pid, tmp, nm, info.file_size, txt(f.get("kind"), 20), txt(f.get("note"), 2000), when(f.get("created")))
         if isinstance(mp.get("id"), int):
             pmap[mp["id"]] = pid
         out["personas"] += 1
@@ -1734,6 +1786,13 @@ def _import_zip(z, job, made):
                 db.x("INSERT INTO pimages(group_id, persona_id, image, memo, created) VALUES (?,?,?,?,?)",
                      (gid, pid if pid and db.q("SELECT 1 FROM personas WHERE id=? AND group_id=?", (pid, gid)) else None,
                       name, txt(im.get("memo"), 2000), when(im.get("created"))))
+        for f in lst(g.get("files")):
+            if isinstance(f, dict) and (info := ent(txt(f.get("file"), 2000))):
+                TMP.mkdir(exist_ok=True)
+                tmp = TMP / secrets.token_hex(12)
+                take(info, tmp)
+                nm = re.sub(r'[\x00-\x1f/\\]', "_", txt(f.get("name"), 200) or info.filename.rsplit("/", 1)[-1])[:200]
+                add_pfile(gid, None, tmp, nm, info.file_size, txt(f.get("kind"), 20), txt(f.get("note"), 2000), when(f.get("created")))
 
     have = {(r["name"], r["creator"] or "", bool(r["itype"])) for r in db.q("SELECT name, creator, itype FROM bots")}
     new_bots = {}  # 이름 → 새 id (그림체 잇기용)
@@ -2713,29 +2772,29 @@ class Handler(BaseHTTPRequestHandler):
                 if params.get("open"):
                     db.x("UPDATE pgroups SET opened=? WHERE id=?", (now(), g["id"]))
                 return self.send(200, g)
-            if len(p) in (4, 5) and p[0] == "personas" and p[1].isdigit() and p[2] == "module" and p[3] in ("lore", "assets", "masset"):
-                x = db.q("SELECT module FROM personas WHERE id=?", (int(p[1]),))
-                tok = persona_module_token(x[0]) if x else None
+            if 2 <= len(p) <= 4 and p[0] == "pfiles" and p[1].isdigit():  # 페르소나 자료: 내려받기 · 로어북 · 에셋
+                f = db.q("SELECT name, path FROM pfiles WHERE id=?", (int(p[1]),))
+                tok = pfile_token(f[0]["path"]) if f else None
                 if not tok:
-                    return self.send(404, {"error": "모듈이 없어요"})
+                    return self.send(404, {"error": "파일이 없어요"})
+                if len(p) == 2:
+                    return self.send_file(DATA / f[0]["path"], "application/octet-stream", f[0]["name"] or "file")
                 try:
-                    if p[3] == "lore" and len(p) == 4:
+                    if p[2] == "lore" and len(p) == 3:
                         return self.send(200, file_lore(tok))
-                    if p[3] == "assets" and len(p) == 4:
+                    if p[2] == "assets" and len(p) == 3:
                         return self.send(200, file_assets(tok))
-                    if p[3] == "masset" and len(p) == 5 and p[4].isdigit():
-                        return self.send_mod_asset(tok, int(p[4]))
+                    if p[2] == "masset" and len(p) == 4 and p[3].isdigit():
+                        return self.send_mod_asset(tok, int(p[3]))
+                    if p[2] == "asset" and len(p) == 4 and p[3].isdigit():
+                        return self.send_card_asset(tok, int(p[3]))
                 except (ValueError, json.JSONDecodeError, OSError, zipfile.BadZipFile) as e:
-                    return self.send(422, {"error": str(e) or "모듈을 읽지 못했어요"})
+                    return self.send(422, {"error": str(e) or "파일을 읽지 못했어요"})
                 return self.send(404, {"error": "없음"})
-            if len(p) in (2, 3) and p[0] == "personas" and p[1].isdigit() and p[2:] in ([], ["module"]):
+            if len(p) == 2 and p[0] == "personas" and p[1].isdigit():
                 x = persona_detail(int(p[1]))
                 if not x:
                     return self.send(404, {"error": "페르소나가 없어요"})
-                if p[2:] == ["module"]:
-                    if not x["module"]:
-                        return self.send(404, {"error": "모듈이 없어요"})
-                    return self.send_file(DATA / x["module"], "application/octet-stream", x["module_name"] or "module.risum")
                 if params.get("open"):
                     db.x("UPDATE personas SET opened=? WHERE id=?", (now(), x["id"]))
                 return self.send(200, x)
@@ -3036,8 +3095,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self.put_upload(params)
             if p and len(p) == 2 and p[0] == "import":
                 return self.put_import(p[1], params)
-            if p and len(p) == 3 and p[0] == "personas" and p[1].isdigit() and p[2] == "module":
-                return self.put_persona_module(int(p[1]), params)
+            if p and len(p) == 3 and p[0] == "pgroups" and p[1].isdigit() and p[2] == "files":
+                return self.put_pfile(int(p[1]), params)
             d = self.body()
             if p == ["auth"]:
                 return self.auth_put(d)
@@ -3130,8 +3189,29 @@ class Handler(BaseHTTPRequestHandler):
                     drop_media(old[0]["image"])
                 if "group_id" in vals:
                     db.x("UPDATE pimages SET group_id=? WHERE persona_id=?", (vals["group_id"], pid))
+                    db.x("UPDATE pfiles SET group_id=? WHERE persona_id=?", (vals["group_id"], pid))
                     pgroup_prune(old[0]["group_id"])
                 return self.send(200, persona_detail(pid))
+            if p and len(p) == 2 and p[0] == "pfiles" and p[1].isdigit():  # {name, kind, note, persona_id(null = 폴더 공통)}
+                fid = int(p[1])
+                r = db.q("SELECT group_id, persona_id, name FROM pfiles WHERE id=?", (fid,))
+                if not r:
+                    return self.send(404, {"error": "파일이 없어요"})
+                gid = r[0]["group_id"]
+                vals = {}
+                if "name" in d:
+                    vals["name"] = re.sub(r'[\x00-\x1f/\\]', "_", str(d["name"] or "")).strip()[:200] or r[0]["name"]
+                if "kind" in d:
+                    vals["kind"] = pfile_kind(d["kind"], vals.get("name", r[0]["name"]))
+                if "note" in d:
+                    vals["note"] = str(d["note"] or "")[:2000]
+                if vals:
+                    db.x(f"UPDATE pfiles SET {', '.join(k + '=?' for k in vals)} WHERE id=?", (*vals.values(), fid))
+                if "persona_id" in d:
+                    pid = d["persona_id"] if isinstance(d["persona_id"], int) and db.q("SELECT 1 FROM personas WHERE id=? AND group_id=?", (d["persona_id"], gid)) else None
+                    if pid != r[0]["persona_id"]:
+                        move_pfile(fid, gid, pid)
+                return self.send(200, {"ok": True, "files": pfile_rows(gid)})
             if p and len(p) == 2 and p[0] == "pimages" and p[1].isdigit():  # {memo, persona_id(null = 폴더 공통)}
                 r = db.q("SELECT group_id FROM pimages WHERE id=?", (int(p[1]),))
                 if not r:
@@ -3355,12 +3435,15 @@ class Handler(BaseHTTPRequestHandler):
         threading.Thread(target=run_import, args=(tok,), daemon=True).start()
         return self.send(200, {"ok": True})
 
-    def put_persona_module(self, pid, params):
-        """페르소나용 모듈(.risum) 원본 — 하나만 두고, 새로 올리면 바꿈."""
+    def put_pfile(self, gid, params):
+        """페르소나 자료실 파일 원본 (persona = 버전 id, 빈칸이면 폴더 공통)."""
         self.close_connection = True
-        if not db.q("SELECT 1 FROM personas WHERE id=?", (pid,)):
+        if not db.q("SELECT 1 FROM pgroups WHERE id=?", (gid,)):
             return self.send(404, {"error": "페르소나가 없어요"})
-        name = re.sub(r'[\x00-\x1f/\\]', "_", params.get("name") or "module.risum").strip()[:200] or "module.risum"
+        pid = int(params["persona"]) if params.get("persona", "").isdigit() else None
+        if pid and not db.q("SELECT 1 FROM personas WHERE id=? AND group_id=?", (pid, gid)):
+            return self.send(404, {"error": "이 폴더의 버전이 아니에요"})
+        name = re.sub(r'[\x00-\x1f/\\]', "_", params.get("name") or "file").strip()[:200] or "file"
         n = int(self.headers.get("Content-Length", "0"))
         if not 0 < n <= MAX_FILE:
             return self.send(413, {"error": f"파일은 {MAX_FILE // 1_000_000_000}GB까지 올릴 수 있어요"})
@@ -3377,8 +3460,8 @@ class Handler(BaseHTTPRequestHandler):
         if left:
             tmp.unlink(missing_ok=True)
             return self.send(400, {"error": "업로드가 중간에 끊겼어요"})
-        set_persona_module(pid, tmp, name, n)
-        return self.send(200, persona_detail(pid))
+        fid = add_pfile(gid, pid, tmp, name, n, params.get("kind", ""))
+        return self.send(200, {"ok": True, "id": fid, "files": pfile_rows(gid)})
 
     def put_upload(self, params):
         """파일 원본을 그대로 받아 디스크에 씀 (1MB씩)."""
@@ -3452,13 +3535,16 @@ class Handler(BaseHTTPRequestHandler):
                 db.x(f"UPDATE {t} SET {col}=? WHERE {col}=?", (to, p[1]))
                 db.x(f"DELETE FROM {p[0]} WHERE key=?", (p[1],))
                 return self.send(200, {"ok": True, "state": state()})
-            if p and len(p) in (2, 3) and p[0] == "personas" and p[1].isdigit() and p[2:] in ([], ["module"]):
+            if p and len(p) == 2 and p[0] == "pfiles" and p[1].isdigit():
+                r = db.q("SELECT group_id FROM pfiles WHERE id=?", (int(p[1]),))
+                if not r:
+                    return self.send(404, {"error": "파일이 없어요"})
+                drop_pfiles("id=?", int(p[1]))
+                return self.send(200, {"ok": True, "files": pfile_rows(r[0]["group_id"])})
+            if p and len(p) == 2 and p[0] == "personas" and p[1].isdigit():
                 pid = int(p[1])
                 if not db.q("SELECT 1 FROM personas WHERE id=?", (pid,)):
                     return self.send(404, {"error": "페르소나가 없어요"})
-                if p[2:] == ["module"]:
-                    drop_persona_module(pid)
-                    return self.send(200, persona_detail(pid))
                 gid = db.q("SELECT group_id FROM personas WHERE id=?", (pid,))[0]["group_id"]
                 drop_persona(pid)
                 return self.send(200, {"ok": True, "group": gid if pgroup_ok(gid) else None})
