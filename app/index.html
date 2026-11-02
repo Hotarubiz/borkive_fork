@@ -425,13 +425,26 @@ img.emo{display:block;max-width:min(300px,100%);max-height:380px;width:auto;marg
 .itabs button:hover{color:var(--ink)}
 .itabs button[aria-selected=true]{color:var(--ink);border-bottom-color:var(--acc)}
 .itabs .add{color:var(--acc)}
-.vbar{display:flex;align-items:center;gap:8px 10px;flex-wrap:wrap;margin-bottom:10px}
-.vbar .pill{min-height:34px;padding:0 13px;text-decoration:none}
-.vbar .pill[aria-current=page]{border-color:var(--acc);background:var(--acc-bg);color:var(--acc-text);font-weight:600}
-.vbar .vadd{border-style:dashed;color:var(--ink3)}
-.vbar .vadd:hover{color:var(--acc-text)}
-.vbar .acts{margin-left:auto}
-@media (max-width:640px){.vbar .acts{margin-left:0;width:100%}}
+.vbar{display:flex;align-items:baseline;gap:6px 22px;flex-wrap:wrap;margin:4px 0 12px}
+.vbar a{display:inline-flex;align-items:baseline;gap:5px;padding:2px 1px;font-family:var(--disp);font-size:19px;font-weight:600;color:var(--mute);text-decoration:none}
+.vbar a:hover{color:var(--ink2)}
+.vbar a[aria-current=page]{color:var(--ink);font-weight:800;box-shadow:inset 0 -7px 0 var(--acc-bg)}
+.vbar a svg{align-self:center}
+.vbar .c{font-family:var(--body);font-size:12px;font-weight:500;color:var(--mute)}
+.vbar .vadd{display:inline-flex;align-items:center;gap:4px;padding:0;border:0;background:none;color:var(--acc-text);font:inherit;font-size:13.5px;font-weight:600;cursor:pointer}
+.vbar .vadd:hover{text-decoration:underline}
+.vact{display:flex;flex-direction:column;gap:8px}
+.vact h3{margin-bottom:0}
+.vact .meta{margin:0 0 4px}
+.vact .vg{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+.vact .vdel{align-self:flex-start;margin-top:2px}
+@media (max-width:980px){  /* 좁으면 단추를 프롬프트 위에 한 줄로 */
+  .cols>aside:has(.vact){display:contents!important}  /* aside에 인라인 flex가 있어서 */
+  .vact{order:-1;flex-direction:row;flex-wrap:wrap;align-items:center;padding:0;background:none;border:0}
+  .vact h3,.vact .meta{display:none}
+  .vact .vg{display:contents}
+  .vact .vdel{align-self:center;margin-top:0}
+}
 .cn-h{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:6px}
 .cn-h h3{margin:0}
 .nlang{display:flex;gap:4px;flex-wrap:wrap}
@@ -3603,8 +3616,8 @@ async function viewPersona(gid, vid) {
 }
 function drawPersona(vid) {
   const g = GX, x = g.versions.find(v => v.id === vid) || g.versions[0];
-  let sub = location.hash.split('/')[4] || 'main';  // 버전 안 하위 탭: main(프롬프트) · lore · assets · gallery
-  if ((sub === 'lore' || sub === 'assets') && !x.module || !['main', 'lore', 'assets', 'gallery'].includes(sub)) sub = 'main';
+  let sub = location.hash.split('/')[4] || 'main';  // 버전 안 하위 탭: main(프롬프트) · module · lore · assets · gallery
+  if ((sub === 'lore' || sub === 'assets') && !x.module || !['main', 'module', 'lore', 'assets', 'gallery'].includes(sub)) sub = 'main';
   const subUrl = (v, t = sub) => `#/p/${g.id}/${v.id}${t === 'main' ? '' : '/' + t}`;
   const nChats = g.versions.reduce((n, v) => n + v.chats.length, 0), nBots = g.versions.reduce((n, v) => n + v.bots.length, 0);
   $('#view').innerHTML = `<div class="wrap">
@@ -3622,34 +3635,35 @@ function drawPersona(vid) {
         </div>
       </div>
     </section>
-    <div class="vbar"><nav class="seg" aria-label="버전">${g.versions.map((v, i) => `<a class="pill" href="${subUrl(v)}" data-rep ${v.id === x.id ? 'aria-current="page"' : ''} title="${day(v.created)}에 넣음${i === 0 && g.versions.length > 1 ? ' · 대표 버전' : ''}">${i === 0 && g.versions.length > 1 ? `${ic('star', 13)}` : ''}${h(verName(v, g))}<span class="c">${v.chats.length || ''}</span></a>`).join('')}
-      <button class="pill vadd" id="pgAdd" title="이 폴더에 버전 하나 더">${ic('plus', 14)}버전</button></nav>
-    <div class="row acts">
-      <button class="btn sm pri" id="pxCopy"${x.prompt ? '' : ' disabled'}>${ic('copy', 16)}프롬프트 복사</button>
-      <button class="btn sm ghost" id="pxEdit">${ic('edit', 16)}고치기</button>
-      <button class="btn sm ghost" id="pxPng" title="리스의 페르소나 불러오기로 넣을 수 있는 PNG">${ic('dl', 16)}리스용 PNG</button>
-      <button class="btn sm ghost" id="pxCopyV" title="이 버전을 그대로 하나 더">${ic('copy', 16)}복제</button>
-      ${g.versions.length > 1 && x.id !== g.versions[0].id ? `<button class="btn sm ghost" id="pxFirst" title="맨 앞 버전 = 폴더 표지">${ic('star', 16)}대표로</button>` : ''}
-      <button class="btn sm ghost danger" id="pxDel">${ic('trash', 16)}${g.versions.length > 1 ? '이 버전 지우기' : '지우기'}</button>
-    </div></div>
+    <nav class="vbar" aria-label="버전">${g.versions.map((v, i) => `<a href="${subUrl(v)}" data-rep ${v.id === x.id ? 'aria-current="page"' : ''} title="${day(v.created)}에 넣음${i === 0 && g.versions.length > 1 ? ' · 대표 버전' : ''}">${i === 0 && g.versions.length > 1 ? `${ic('star', 13)}` : ''}${h(verName(v, g))}<span class="c">${v.chats.length || ''}</span></a>`).join('')}
+      <button class="vadd" id="pgAdd" title="이 폴더에 버전 하나 더">${ic('plus', 14)}버전</button></nav>
     <div class="itabs" role="tablist" aria-label="이 버전">
       <button role="tab" data-sub="main" aria-selected="${sub === 'main'}">프롬프트</button>
+      <button role="tab" data-sub="module" aria-selected="${sub === 'module'}">${ic('puzzle', 14)}모듈<span class="meta">${x.module ? 1 : ''}</span></button>
       ${x.module ? `<button role="tab" data-sub="lore" aria-selected="${sub === 'lore'}">${ic('book', 14)}로어북</button>
       <button role="tab" data-sub="assets" aria-selected="${sub === 'assets'}">${ic('img', 14)}에셋</button>` : ''}
       <button role="tab" data-sub="gallery" aria-selected="${sub === 'gallery'}">${ic('img', 14)}갤러리<span class="meta">${g.images.filter(i => !i.persona_id || i.persona_id === x.id).length || ''}</span></button></div>
-    ${sub !== 'main' ? '<div id="pxSub"></div>' : ''}
+    ${sub === 'module' ? `<div class="box" style="max-width:640px"><h3>${ic('puzzle', 16)}페르소나용 모듈</h3>
+        ${x.module ? `<div class="pmod"><span class="fi">RISUM</span><div style="min-width:0;flex:1"><b style="display:block">${h(x.module_name)}</b><span class="meta">${size(x.module_size)}</span></div></div>
+          <div class="row" style="margin-top:12px"><a class="btn sm" href="/api/personas/${x.id}/module" download>${ic('dl', 15)}내려받기</a>
+            <button class="btn sm ghost" id="pxMod">바꾸기</button><button class="btn sm ghost danger" id="pxModDel">빼기</button></div>
+          <p class="hint" style="margin:12px 0 0">모듈 안의 로어북 · 에셋은 옆 탭에서 볼 수 있어요.</p>`
+          : `<p class="hint">이 버전과 같이 쓰는 모듈(.risum)이 있으면 올려 두세요. 올리면 로어북 · 에셋 탭이 생겨요.</p><button class="btn sm" id="pxMod">${ic('plus', 15)}모듈 올리기</button>`}
+        <p class="meta" id="pxModSt" style="margin:8px 0 0"></p></div>` : sub !== 'main' ? '<div id="pxSub"></div>' : ''}
     <div class="cols"${sub === 'main' ? '' : ' hidden'}><div style="min-width:0;display:flex;flex-direction:column;gap:18px">
       <div class="box"><h3>프롬프트<span class="meta" style="font-weight:500">리스 이름 ${h(x.name)}</span>${x.prompt ? `<button class="ib" id="pxCp2" aria-label="프롬프트 복사" title="복사">${ic('copy', 16)}</button>` : ''}</h3>
         ${x.prompt ? `<pre class="sprm" style="font:14px/1.7 var(--body);max-height:480px">${h(x.prompt)}</pre>` : '<p class="hint">아직 프롬프트가 없어요. 고치기에서 넣어 주세요.</p>'}</div>
       <div class="box"><h3>${ic('chat', 16)}이 버전으로 한 채팅 로그 <span class="meta" style="font-weight:500">${x.chats.length}</span></h3>
         ${x.chats.length ? `<div class="chats">${x.chats.map(c => chatRow(c, true)).join('')}</div>` : '<p class="hint">채팅 로그 화면 위쪽에서 페르소나를 고르면 여기 모여요.</p>'}</div>
     </div><aside style="display:flex;flex-direction:column;gap:18px">
-      <div class="box"><h3>${ic('puzzle', 16)}페르소나용 모듈</h3>
-        ${x.module ? `<div class="pmod"><span class="fi">RISUM</span><div style="min-width:0;flex:1"><b style="display:block">${h(x.module_name)}</b><span class="meta">${size(x.module_size)}</span></div></div>
-          <div class="row" style="margin-top:12px"><a class="btn sm" href="/api/personas/${x.id}/module" download>${ic('dl', 15)}내려받기</a>
-            <button class="btn sm ghost" id="pxMod">바꾸기</button><button class="btn sm ghost danger" id="pxModDel">빼기</button></div>`
-          : `<p class="hint">이 버전과 같이 쓰는 모듈(.risum)이 있으면 올려 두세요.</p><button class="btn sm" id="pxMod">${ic('plus', 15)}모듈 올리기</button>`}
-        <p class="meta" id="pxModSt" style="margin:8px 0 0"></p></div>
+      <div class="box vact"><h3>${g.versions.length > 1 ? '이 버전' : '페르소나'}</h3>
+        <p class="meta">${day(x.created)}에 넣음${g.versions.length > 1 && x.id === g.versions[0].id ? ' · 대표 버전' : ''}</p>
+        <button class="btn sm pri" id="pxCopy"${x.prompt ? '' : ' disabled'}>${ic('copy', 16)}프롬프트 복사</button>
+        <div class="vg"><button class="btn sm" id="pxEdit">${ic('edit', 16)}고치기</button>
+          <button class="btn sm" id="pxPng" title="리스의 페르소나 불러오기로 넣을 수 있는 PNG">${ic('dl', 16)}리스용 PNG</button>
+          <button class="btn sm" id="pxCopyV" title="이 버전을 그대로 하나 더">${ic('copy', 16)}복제</button>
+          ${g.versions.length > 1 && x.id !== g.versions[0].id ? `<button class="btn sm" id="pxFirst" title="맨 앞 버전 = 폴더 표지">${ic('star', 16)}대표로</button>` : ''}</div>
+        <button class="btn sm ghost danger vdel" id="pxDel">${ic('trash', 16)}${g.versions.length > 1 ? '이 버전 지우기' : '지우기'}</button></div>
       <div class="box"><h3>${ic('user', 16)}기본으로 쓰는 봇</h3>
         ${x.bots.length ? `<div class="sbl">${x.bots.map(b => `<a href="#/b/${b.id}" class="sbr">${b.cover ? `<img src="/m/${h(b.cover)}" alt="" loading="lazy">` : `<span class="sph">${first(b.name)}</span>`}<span class="sbn">${h(b.name)}</span></a>`).join('')}</div>`
           : '<p class="hint">봇 페이지 오른쪽에서 기본 페르소나로 정해 두면, 그 봇에 새로 올리는 채팅 로그에 이 버전이 붙어요.</p>'}</div>
@@ -3666,7 +3680,7 @@ function drawPersona(vid) {
     onItems: items => { g.images = items; },
     coverLabel: `'${verName(x, g)}' 그림으로`,
     cover: async i => { await api('PUT', `/api/personas/${x.id}`, {image: await blobData(i.image)}); toast('그림을 바꿨어요'); await reload(); }});
-  else if (sub !== 'main') {
+  else if (sub === 'lore' || sub === 'assets') {
     const mf = {id: 0, name: x.module_name, kind: 'module', base: `/api/personas/${x.id}/module`};
     (sub === 'lore' ? loreView : assetView)($('#pxSub'), [mf]);
   }
@@ -3728,7 +3742,7 @@ function drawPersona(vid) {
       toast('지웠어요');
     } catch (e) { fail(e); }
   };
-  $('#pxMod').onclick = async () => {
+  if ($('#pxMod')) $('#pxMod').onclick = async () => {
     const [f] = await pick('.risum');
     if (!f) return;
     const st = $('#pxModSt');
@@ -4191,13 +4205,8 @@ function drawStyle() {
         </div>
       </div>
     </section>
-    <div class="vbar"><nav class="seg" aria-label="변형">${vars.map(y => `<a class="pill" href="${url(y)}" data-rep ${y === v ? 'aria-current="page"' : ''} title="${y.id ? `${day(y.created)}에 만듦` : '그림체 기본 · 목록 표지는 여기 견본'}">${y.id ? '' : ic('star', 13)}${h(svName(vars, y))}</a>`).join('')}
-      <button class="pill vadd" id="syVAdd" title="지금 변형 내용으로 하나 더">${ic('plus', 14)}변형</button></nav>
-    <div class="row acts">
-      <button class="btn sm pri" id="syCopy"${v.prompt ? '' : ' disabled'}>${ic('copy', 16)}프롬프트 복사</button>
-      <button class="btn sm ghost" id="syVEdit">${ic('edit', 16)}고치기</button>
-      ${v.id ? `<button class="btn sm ghost danger" id="syVDel">${ic('trash', 16)}이 변형 지우기</button>` : ''}
-    </div></div>
+    <nav class="vbar" aria-label="변형">${vars.map(y => `<a href="${url(y)}" data-rep ${y === v ? 'aria-current="page"' : ''} title="${y.id ? `${day(y.created)}에 만듦` : '그림체 기본 · 목록 표지는 여기 견본'}">${y.id ? '' : ic('star', 13)}${h(svName(vars, y))}</a>`).join('')}
+      <button class="vadd" id="syVAdd" title="지금 변형 내용으로 하나 더">${ic('plus', 14)}변형</button></nav>
     <div class="itabs" role="tablist" aria-label="이 변형">
       <button role="tab" data-sub="main" aria-selected="${sub === 'main'}">프롬프트 · 견본</button>
       <button role="tab" data-sub="gallery" aria-selected="${sub === 'gallery'}">${ic('img', 14)}갤러리<span class="meta">${galN || ''}</span></button></div>
@@ -4215,6 +4224,11 @@ function drawStyle() {
           <div class="simb">${i ? `<button class="ib" data-front aria-label="대표로" title="대표 그림으로">${ic('star', 14)}</button>` : ''}${g.meta && g.meta.prompt ? `<button class="ib" data-gp aria-label="이 그림 프롬프트" title="이 그림의 프롬프트 복사">${ic('copy', 14)}</button>` : ''}<button class="ib" data-gdel aria-label="지우기" title="지우기">${ic('trash', 14)}</button></div></div>`).join('')}</div>`
           : `<p class="hint">${v.id ? '이 변형으로 뽑은 견본 그림을 더해 두면 차이가 한눈에 보여요.' : '견본 그림을 더해 두면 어떤 그림체인지 한눈에 보여요.'}</p>`}</div>
     </div><aside style="display:flex;flex-direction:column;gap:18px">
+      <div class="box vact"><h3>${vars.length > 1 ? '이 변형' : '이 그림체'}</h3>
+        <p class="meta">${v.id ? `${day(v.created)}에 만듦` : `그림체 기본${vars.length > 1 ? ' · 목록 표지는 여기 견본' : ''}`}</p>
+        <button class="btn sm pri" id="syCopy"${v.prompt ? '' : ' disabled'}>${ic('copy', 16)}프롬프트 복사</button>
+        <button class="btn sm" id="syVEdit">${ic('edit', 16)}고치기</button>
+        ${v.id ? `<button class="btn sm ghost danger vdel" id="syVDel">${ic('trash', 16)}이 변형 지우기</button>` : ''}</div>
       <div class="box"><h3>${ic('link', 16)}이 그림체를 쓰는 봇<button class="ib" id="syBot" aria-label="봇 잇기" title="봇 잇기">${ic('plus', 16)}</button></h3>
         ${x.bots.length ? `<div class="sbl">${x.bots.map(b => `<div class="sbr"><a href="#/b/${b.id}" class="sbr">${b.cover ? `<img src="/m/${h(b.cover)}" alt="" loading="lazy">` : `<span class="sph">${h([...(b.name || '?')][0])}</span>`}<span class="sbn">${h(b.name)}</span></a>
           <span class="srole ${b.role}">${SROLE[b.role]}</span><button class="ib" data-unb="${b.id}" aria-label="잇기 풀기" title="잇기 풀기">${ic('x', 14)}</button></div>`).join('')}</div>`
