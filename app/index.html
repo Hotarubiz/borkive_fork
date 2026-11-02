@@ -425,6 +425,13 @@ img.emo{display:block;max-width:min(300px,100%);max-height:380px;width:auto;marg
 .itabs button:hover{color:var(--ink)}
 .itabs button[aria-selected=true]{color:var(--ink);border-bottom-color:var(--acc)}
 .itabs .add{color:var(--acc)}
+.vbar{display:flex;align-items:center;gap:8px 10px;flex-wrap:wrap;margin-bottom:10px}
+.vbar .pill{min-height:34px;padding:0 13px;text-decoration:none}
+.vbar .pill[aria-current=page]{border-color:var(--acc);background:var(--acc-bg);color:var(--acc-text);font-weight:600}
+.vbar .vadd{border-style:dashed;color:var(--ink3)}
+.vbar .vadd:hover{color:var(--acc-text)}
+.vbar .acts{margin-left:auto}
+@media (max-width:640px){.vbar .acts{margin-left:0;width:100%}}
 .cn-h{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:6px}
 .cn-h h3{margin:0}
 .nlang{display:flex;gap:4px;flex-wrap:wrap}
@@ -3610,22 +3617,21 @@ function drawPersona(vid) {
         <div class="row"><div class="seg" id="pgType">${Object.entries(PTYPE).map(([k, v]) => `<button class="pill" data-t="${k}" aria-pressed="${g.ptype === k}" title="${g.ptype === k ? '한 번 더 누르면 분류 없음' : ''}">${h(v)}</button>`).join('')}
           <button class="ib" id="pgTyEdit" aria-label="분류 고치기" title="분류 고치기 · 더하기">${ic('edit', 16)}</button></div></div>
         <div class="row" style="margin-top:18px">
-          <button class="btn sm pri" id="pgAdd">${ic('plus', 16)}버전 더하기</button>
           <button class="btn sm ghost" id="pgName">${ic('edit', 16)}폴더 이름 고치기</button>
           <button class="btn sm ghost danger" id="pgDel">${ic('trash', 16)}폴더째 지우기</button>
         </div>
       </div>
     </section>
-    <nav class="tabs">${g.versions.map((v, i) => `<a class="tab" href="${subUrl(v)}" data-rep ${v.id === x.id ? 'aria-current="page"' : ''}>${i === 0 && g.versions.length > 1 ? `${ic('star', 13)}` : ''}${h(verName(v, g))}<span class="c">${v.chats.length || ''}</span></a>`).join('')}</nav>
-    <div class="row" style="margin:-8px 0 20px">
-      <span class="meta" style="margin-right:auto">리스 이름 <b>${h(x.name)}</b>${x.label ? ` · 버전 <b>${h(x.label)}</b>` : ''} · ${day(x.created)}에 넣음</span>
+    <div class="vbar"><nav class="seg" aria-label="버전">${g.versions.map((v, i) => `<a class="pill" href="${subUrl(v)}" data-rep ${v.id === x.id ? 'aria-current="page"' : ''} title="${day(v.created)}에 넣음${i === 0 && g.versions.length > 1 ? ' · 대표 버전' : ''}">${i === 0 && g.versions.length > 1 ? `${ic('star', 13)}` : ''}${h(verName(v, g))}<span class="c">${v.chats.length || ''}</span></a>`).join('')}
+      <button class="pill vadd" id="pgAdd" title="이 폴더에 버전 하나 더">${ic('plus', 14)}버전</button></nav>
+    <div class="row acts">
       <button class="btn sm pri" id="pxCopy"${x.prompt ? '' : ' disabled'}>${ic('copy', 16)}프롬프트 복사</button>
       <button class="btn sm ghost" id="pxEdit">${ic('edit', 16)}고치기</button>
       <button class="btn sm ghost" id="pxPng" title="리스의 페르소나 불러오기로 넣을 수 있는 PNG">${ic('dl', 16)}리스용 PNG</button>
       <button class="btn sm ghost" id="pxCopyV" title="이 버전을 그대로 하나 더">${ic('copy', 16)}복제</button>
       ${g.versions.length > 1 && x.id !== g.versions[0].id ? `<button class="btn sm ghost" id="pxFirst" title="맨 앞 버전 = 폴더 표지">${ic('star', 16)}대표로</button>` : ''}
       <button class="btn sm ghost danger" id="pxDel">${ic('trash', 16)}${g.versions.length > 1 ? '이 버전 지우기' : '지우기'}</button>
-    </div>
+    </div></div>
     <div class="itabs" role="tablist" aria-label="이 버전">
       <button role="tab" data-sub="main" aria-selected="${sub === 'main'}">프롬프트</button>
       ${x.module ? `<button role="tab" data-sub="lore" aria-selected="${sub === 'lore'}">${ic('book', 14)}로어북</button>
@@ -3633,7 +3639,7 @@ function drawPersona(vid) {
       <button role="tab" data-sub="gallery" aria-selected="${sub === 'gallery'}">${ic('img', 14)}갤러리<span class="meta">${g.images.filter(i => !i.persona_id || i.persona_id === x.id).length || ''}</span></button></div>
     ${sub !== 'main' ? '<div id="pxSub"></div>' : ''}
     <div class="cols"${sub === 'main' ? '' : ' hidden'}><div style="min-width:0;display:flex;flex-direction:column;gap:18px">
-      <div class="box"><h3>프롬프트${x.prompt ? `<button class="ib" id="pxCp2" aria-label="프롬프트 복사" title="복사">${ic('copy', 16)}</button>` : ''}</h3>
+      <div class="box"><h3>프롬프트<span class="meta" style="font-weight:500">리스 이름 ${h(x.name)}</span>${x.prompt ? `<button class="ib" id="pxCp2" aria-label="프롬프트 복사" title="복사">${ic('copy', 16)}</button>` : ''}</h3>
         ${x.prompt ? `<pre class="sprm" style="font:14px/1.7 var(--body);max-height:480px">${h(x.prompt)}</pre>` : '<p class="hint">아직 프롬프트가 없어요. 고치기에서 넣어 주세요.</p>'}</div>
       <div class="box"><h3>${ic('chat', 16)}이 버전으로 한 채팅 로그 <span class="meta" style="font-weight:500">${x.chats.length}</span></h3>
         ${x.chats.length ? `<div class="chats">${x.chats.map(c => chatRow(c, true)).join('')}</div>` : '<p class="hint">채팅 로그 화면 위쪽에서 페르소나를 고르면 여기 모여요.</p>'}</div>
@@ -4179,20 +4185,19 @@ function drawStyle() {
           <button class="ib" id="syTyEdit" aria-label="분류 고치기" title="분류 고치기 · 더하기">${ic('edit', 16)}</button></div></div>
         ${x.tags.length ? `<div class="row btags">${x.tags.map(t => `<span class="btag"><span>#${h(t)}</span></span>`).join('')}</div>` : ''}
         <div class="row" style="margin-top:18px">
-          <button class="btn sm pri" id="syVAdd">${ic('plus', 16)}변형 더하기</button>
           <button class="btn sm ghost" id="syEdit">${ic('edit', 16)}이름·정보 고치기</button>
           <a class="btn sm ghost" href="/api/styles/export?ids=${x.id}">${ic('dl', 16)}파일로 내보내기</a>
           <button class="btn sm ghost danger" id="syDel">${ic('trash', 16)}지우기</button>
         </div>
       </div>
     </section>
-    <nav class="tabs">${vars.map(y => `<a class="tab" href="${url(y)}" data-rep ${y === v ? 'aria-current="page"' : ''}>${y.id ? '' : ic('star', 13)}${h(svName(vars, y))}</a>`).join('')}</nav>
-    <div class="row" style="margin:-8px 0 20px">
-      <span class="meta" style="margin-right:auto">${v.id ? `변형 <b>${h(svName(vars, v))}</b> · ${day(v.created)}에 만듦` : `<b>${h(svName(vars, v))}</b> · 그림체 기본${vars.length > 1 ? ' (목록 표지는 여기 견본)' : ''}`}</span>
+    <div class="vbar"><nav class="seg" aria-label="변형">${vars.map(y => `<a class="pill" href="${url(y)}" data-rep ${y === v ? 'aria-current="page"' : ''} title="${y.id ? `${day(y.created)}에 만듦` : '그림체 기본 · 목록 표지는 여기 견본'}">${y.id ? '' : ic('star', 13)}${h(svName(vars, y))}</a>`).join('')}
+      <button class="pill vadd" id="syVAdd" title="지금 변형 내용으로 하나 더">${ic('plus', 14)}변형</button></nav>
+    <div class="row acts">
       <button class="btn sm pri" id="syCopy"${v.prompt ? '' : ' disabled'}>${ic('copy', 16)}프롬프트 복사</button>
       <button class="btn sm ghost" id="syVEdit">${ic('edit', 16)}고치기</button>
       ${v.id ? `<button class="btn sm ghost danger" id="syVDel">${ic('trash', 16)}이 변형 지우기</button>` : ''}
-    </div>
+    </div></div>
     <div class="itabs" role="tablist" aria-label="이 변형">
       <button role="tab" data-sub="main" aria-selected="${sub === 'main'}">프롬프트 · 견본</button>
       <button role="tab" data-sub="gallery" aria-selected="${sub === 'gallery'}">${ic('img', 14)}갤러리<span class="meta">${galN || ''}</span></button></div>
