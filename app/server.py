@@ -35,7 +35,8 @@ API (JSON):
   GET    /api/chats?bot=    POST /api/chats    GET|PUT|DELETE /api/chats/<id>   (persona_id: null = 지정 안 함, POST에서 빼면 봇의 기본 페르소나)
   GET    /api/personas   POST /api/personas {group_id?, name, label, prompt, memo, image(data URL)}   GET|PUT|DELETE /api/personas/<id> (PUT drop_image, group_id)
   GET|PUT|DELETE /api/personas/<id>/module?name=   페르소나용 모듈(.risum) 하나 (PUT은 본문 그대로)
-  GET    /api/pgroups   GET|PUT|DELETE /api/pgroups/<id>   PUT {name, order: [버전 id…]}
+  POST   /api/personas/<id>/copy {label, group_id: 빼면 같은 폴더 · null이면 새 폴더}   버전 복제 (그림·모듈도 새 파일로)
+  GET    /api/pgroups   GET|PUT|DELETE /api/pgroups/<id>   PUT {name, ptype, order: [버전 id…]}
          페르소나 = 폴더(사람 하나) 안의 버전들. 버전 = 그림 한 장 + 프롬프트 + 메모. 봇의 기본 페르소나는 PUT /api/bots/<id> {persona_id, fill_chats}
   GET    /api/styles   GET|PUT|DELETE /api/styles/<id>   POST /api/styles {name, stype, prompt, negative, settings, images: [{data, meta}], folders, tags…}
   POST   /api/styles/<id>/images {images}   PUT|DELETE /api/style_images/<id> ({front: true} = 대표 그림)
@@ -1220,6 +1221,26 @@ def drop_persona(pid):
     drop_media(r[0]["image"])
     prune(DATA / persona_home(pid))
     pgroup_prune(r[0]["group_id"])
+
+
+def copy_persona(pid, label, gid):
+    """버전 복제: 글 · 그림 · 모듈까지 새 파일로. gid가 None이면 새 폴더(같은 분류, 이름 뒤에 '사본')."""
+    x = db.q("SELECT p.*, g.name AS group_name, g.ptype FROM personas p LEFT JOIN pgroups g ON g.id=p.group_id WHERE p.id=?", (pid,))[0]
+    if gid is None:
+        gid = pgroup_new(f"{x['group_name'] or x['name']} 사본", x["ptype"])
+    img = None
+    if x["image"] and re.fullmatch(MEDIA_RE, x["image"]) and (MEDIA / x["image"]).is_file():
+        img = f"{secrets.token_hex(10)}.{x['image'].rsplit('.', 1)[1]}"
+        shutil.copyfile(MEDIA / x["image"], MEDIA / img)
+    t = now()
+    nid, _ = db.x("""INSERT INTO personas(name, label, prompt, memo, image, group_id, sort, created, updated, opened) VALUES (?,?,?,?,?,?,?,?,?,?)""",
+                  (x["name"], label[:60], x["prompt"], x["memo"], img, gid, pgroup_next(gid), t, t, t))
+    if x["module"] and (DATA / x["module"]).is_file():
+        TMP.mkdir(exist_ok=True)
+        tmp = TMP / (secrets.token_hex(12) + ".part")
+        shutil.copyfile(DATA / x["module"], tmp)
+        set_persona_module(nid, tmp, x["module_name"] or "module.risum", tmp.stat().st_size)
+    return nid
 
 
 def png_persona(raw, name, prompt, note):
@@ -2643,6 +2664,13 @@ class Handler(BaseHTTPRequestHandler):
                 return
             if p == ["styles"]:
                 return self.send(200, style_detail(new_style(d)))
+            if len(p) == 3 and p[0] == "personas" and p[1].isdigit() and p[2] == "copy":  # {label, group_id: 없으면 같은 폴더, null이면 새 폴더}
+                old = db.q("SELECT label, group_id FROM personas WHERE id=?", (int(p[1]),))
+                if not old:
+                    return self.send(404, {"error": "페르소나가 없어요"})
+                gid = (pgroup_ok(d["group_id"]) if d["group_id"] is not None else None) if "group_id" in d else old[0]["group_id"]
+                label = str(d.get("label") if d.get("label") is not None else f"{old[0]['label'] or '기본'} 사본").strip()
+                return self.send(200, persona_detail(copy_persona(int(p[1]), label, gid)))
             if p == ["personas"]:
                 vals = persona_vals(d)
                 vals.setdefault("name", "이름 없는 페르소나")

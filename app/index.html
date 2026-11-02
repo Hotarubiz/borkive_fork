@@ -574,6 +574,15 @@ img.emo{display:block;max-width:min(300px,100%);max-height:380px;width:auto;marg
 .pfimg{display:flex;align-items:center;gap:14px}
 .pfimg .cv{width:84px;flex:none;border-radius:12px}
 .pfimg .cv .ph{font-size:30px}
+.pimz{display:flex;flex-direction:column;align-items:center;gap:10px;padding:16px;border:2px dashed var(--line2);border-radius:16px;background:var(--sunk);outline:0}
+.pimz.over,.pimz:focus-visible{border-color:var(--acc)}
+.pimz img{max-width:100%;max-height:340px;border-radius:10px;object-fit:contain;display:block}
+.pimz .ph{width:180px;aspect-ratio:3/4;border-radius:12px;display:grid;place-items:center;background:var(--card2);color:var(--ink3)}
+.pimo{display:flex;gap:8px;flex-wrap:wrap}
+.pimo button{display:flex;flex-direction:column;align-items:center;gap:4px;width:84px;padding:4px 4px 6px;border:1px solid var(--line2);border-radius:10px;background:var(--card2);color:var(--ink2);font-size:12px;cursor:pointer}
+.pimo button[aria-pressed=true]{border-color:var(--acc);color:var(--ink)}
+.pimo img{width:74px;height:74px;object-fit:cover;border-radius:7px}
+.pimo span{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .found{display:flex;flex-direction:column;gap:8px}
 .found label{display:flex;align-items:center;gap:12px;padding:10px 12px;border-radius:12px;border:1px solid var(--line2);background:var(--card2)}
 .found input[type=checkbox]{width:18px;height:18px;accent-color:var(--acc)}
@@ -3400,6 +3409,79 @@ async function viewPersonas() {
   applyGsize($('#grid'));
   $('#gSize').oninput = e => { gsize = +e.target.value; try { localStorage.setItem('bs-size', gsize); } catch (er) {} applyGsize($('#grid')); };
 }
+// 버전 그림 바꾸기: 고르기 · 끌어 놓기 · 붙여넣기 · 다른 버전 그림 쓰기 · 빼기 (file = 표지에 끌어 놓은 그림)
+function personaImgDialog(x, g, file) {
+  return new Promise(res => {
+    let img = null, drop = false;
+    const others = g.versions.filter(v => v.id !== x.id && v.image);
+    const m = modal(`<header><h2>그림 바꾸기</h2><span>${h(verName(x, g))}</span>${xBtn}</header>
+      <div class="bd">
+        <div class="pimz" id="piZone" tabindex="0"><div id="piView"></div><span class="hint" style="margin:0">그림을 여기로 끌어 놓거나 붙여넣어도 돼요 (Ctrl+V)</span></div>
+        <div class="row"><button type="button" class="btn sm pri" id="piPick">${ic('img', 15)}그림 고르기</button>
+          <button type="button" class="btn sm ghost" id="piBig">${ic('search', 15)}크게 보기</button>
+          <button type="button" class="btn sm ghost danger" id="piDrop">${ic('trash', 15)}빼기</button></div>
+        ${others.length ? `<div class="field">다른 버전 그림 쓰기<div class="pimo">${others.map(v => `<button type="button" data-v="${v.id}" aria-pressed="false"><img src="/m/${h(v.image)}" alt="" loading="lazy"><span>${h(verName(v, g))}</span></button>`).join('')}</div></div>` : ''}
+      </div>
+      <footer><span class="note"></span><button class="btn" data-close>취소</button><button class="btn pri" data-ok disabled>저장</button></footer>`, 'narrow');
+    m.onclose = () => res(null);
+    const cur = () => img || (!drop && x.image ? `/m/${x.image}` : '');
+    const draw = () => {
+      const u = cur();
+      $('#piView', m).innerHTML = u ? `<img src="${h(u)}" alt="">` : `<span class="ph">${ic('user', 40, 1.4)}</span>`;
+      $('#piBig', m).hidden = $('#piDrop', m).hidden = !u;
+      $('[data-ok]', m).disabled = !img && !(drop && x.image);
+    };
+    const set = async (f, from) => {
+      if (!f || !/^image\//.test(f.type)) return toast('그림 파일이 아니에요', true);
+      try { img = await imgData(f); drop = false; draw(); } catch (e) { fail(e); }
+      $$('.pimo button', m).forEach(b => b.setAttribute('aria-pressed', b === from));
+    };
+    draw();
+    const zone = $('#piZone', m);
+    zone.addEventListener('dragover', e => { e.preventDefault(); zone.classList.add('over'); });
+    zone.addEventListener('dragleave', () => zone.classList.remove('over'));
+    zone.addEventListener('drop', e => { e.preventDefault(); zone.classList.remove('over'); set(e.dataTransfer.files[0]); });
+    m.addEventListener('paste', e => { const it = [...e.clipboardData.items].find(i => i.type.startsWith('image/')); if (it) { e.preventDefault(); set(it.getAsFile()); } });
+    $('#piPick', m).onclick = async () => { const [f] = await pick('image/*'); if (f) set(f); };
+    $('#piBig', m).onclick = () => lightbox(cur());
+    $('#piDrop', m).onclick = () => { img = null; drop = true; $$('.pimo button', m).forEach(b => b.setAttribute('aria-pressed', false)); draw(); };
+    $$('.pimo button', m).forEach(b => b.onclick = async () => {
+      const v = others.find(o => o.id === +b.dataset.v);
+      try { await set(await (await fetch(`/m/${v.image}`)).blob(), b); } catch (e) { fail(e); }
+    });
+    if (file) set(file);
+    $('[data-ok]', m).onclick = async () => {
+      const btn = $('[data-ok]', m); btn.disabled = true;
+      try { const d = await api('PUT', `/api/personas/${x.id}`, img ? {image: img} : {drop_image: true}); m.onclose = null; m.close(); res(d); }
+      catch (e) { fail(e); btn.disabled = false; }
+    };
+  });
+}
+// 버전 복제: 글 · 그림 · 모듈까지 (이 폴더에 또는 새 폴더로)
+function personaCopyDialog(x, g) {
+  return new Promise(res => {
+    const m = modal(`<header><h2>버전 복제</h2><span>${h(g.name)} · ${h(verName(x, g))}</span>${xBtn}</header>
+      <div class="bd">
+        <label class="field">새 버전 이름<input class="inp" id="pcLabel" maxlength="60" value="${h(`${verName(x, g)} 사본`)}"></label>
+        <div class="field">넣을 곳<div class="seg" id="pcTo"><button type="button" class="pill" data-to="here" aria-pressed="true">이 폴더</button>
+          <button type="button" class="pill" data-to="new" aria-pressed="false">새 폴더로 (${h(g.name)} 사본)</button></div></div>
+        <p class="hint" style="margin:0">프롬프트 · 메모 · 그림${x.module ? ' · 모듈' : ''}까지 똑같이 만들어요. 채팅 로그와 기본 봇은 따라가지 않아요.</p>
+      </div>
+      <footer><span class="note"></span><button class="btn" data-close>취소</button><button class="btn pri" data-ok>복제</button></footer>`, 'narrow');
+    m.onclose = () => res(null);
+    let to = 'here';
+    $$('#pcTo .pill', m).forEach(b => b.onclick = () => { to = b.dataset.to; $$('#pcTo .pill', m).forEach(y => y.setAttribute('aria-pressed', y === b)); });
+    const ok = async () => {
+      const btn = $('[data-ok]', m); btn.disabled = true;
+      try {
+        const d = await api('POST', `/api/personas/${x.id}/copy`, {label: $('#pcLabel', m).value.trim(), ...(to === 'new' ? {group_id: null} : {})});
+        m.onclose = null; m.close(); res(d);
+      } catch (e) { fail(e); btn.disabled = false; }
+    };
+    $('[data-ok]', m).onclick = ok;
+    $('#pcLabel', m).onkeydown = e => { if (e.key === 'Enter' && !e.isComposing) ok(); };
+  });
+}
 let GX = null;  // 열어 둔 페르소나 폴더
 async function viewPersona(gid, vid) {
   const fresh = !GX || GX.id !== gid;
@@ -3432,6 +3514,7 @@ function drawPersona(vid) {
       <button class="btn sm pri" id="pxCopy"${x.prompt ? '' : ' disabled'}>${ic('copy', 16)}프롬프트 복사</button>
       <button class="btn sm ghost" id="pxEdit">${ic('edit', 16)}고치기</button>
       <button class="btn sm ghost" id="pxPng" title="리스의 페르소나 불러오기로 넣을 수 있는 PNG">${ic('dl', 16)}리스용 PNG</button>
+      <button class="btn sm ghost" id="pxCopyV" title="이 버전을 그대로 하나 더">${ic('copy', 16)}복제</button>
       ${g.versions.length > 1 && x.id !== g.versions[0].id ? `<button class="btn sm ghost" id="pxFirst" title="맨 앞 버전 = 폴더 표지">${ic('star', 16)}대표로</button>` : ''}
       <button class="btn sm ghost danger" id="pxDel">${ic('trash', 16)}${g.versions.length > 1 ? '이 버전 지우기' : '지우기'}</button>
     </div>
@@ -3463,6 +3546,19 @@ function drawPersona(vid) {
   $('#pgAdd').onclick = async () => {
     const d = await personaDialog(null, {group: g.id, g, from: x, ptype: g.ptype});
     if (d) { await loadState(); d.group_id === g.id ? replaceHash(`#/p/${g.id}/${d.id}`) : (location.hash = `#/p/${d.group_id}/${d.id}`); toast('버전을 더했어요'); }
+  };
+  const cv = $('.bhero .cv'), imgDlg = async f => { if (await personaImgDialog(x, g, f)) { await reload(); toast('그림을 바꿨어요'); } };
+  cv.title = '그림 바꾸기 (그림을 끌어 놓아도 돼요)';
+  cv.onclick = () => imgDlg();
+  cv.addEventListener('dragover', e => { e.preventDefault(); cv.style.outline = '3px solid var(--acc)'; });
+  cv.addEventListener('dragleave', () => { cv.style.outline = ''; });
+  cv.addEventListener('drop', e => { e.preventDefault(); cv.style.outline = ''; if (e.dataTransfer.files[0]) imgDlg(e.dataTransfer.files[0]); });
+  $('#pxCopyV').onclick = async () => {
+    const d = await personaCopyDialog(x, g);
+    if (!d) return;
+    await loadState();
+    d.group_id === g.id ? replaceHash(`#/p/${g.id}/${d.id}`) : (location.hash = `#/p/${d.group_id}/${d.id}`);
+    toast('복제했어요');
   };
   $$('#pgType .pill').forEach(b => b.onclick = async () => {  // 같은 분류를 다시 누르면 분류 없음
     try { GX = await api('PUT', `/api/pgroups/${g.id}`, {ptype: g.ptype === b.dataset.t ? '' : b.dataset.t}); drawPersona(x.id); loadState(); } catch (e) { fail(e); }
