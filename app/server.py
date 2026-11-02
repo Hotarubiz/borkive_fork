@@ -33,9 +33,10 @@ API (JSON):
   PUT    /api/upload?bot=&version=|shelf=&kind=&name=    파일 원본(본문 그대로)
   GET    /api/files?all=1   PUT|DELETE /api/files/<id>
   GET    /api/chats?bot=    POST /api/chats    GET|PUT|DELETE /api/chats/<id>   (persona_id: null = 지정 안 함, POST에서 빼면 봇의 기본 페르소나)
-  GET    /api/personas   POST /api/personas {name, prompt, memo, image(data URL)}   GET|PUT|DELETE /api/personas/<id> (PUT drop_image)
+  GET    /api/personas   POST /api/personas {group_id?, name, label, prompt, memo, image(data URL)}   GET|PUT|DELETE /api/personas/<id> (PUT drop_image, group_id)
   GET|PUT|DELETE /api/personas/<id>/module?name=   페르소나용 모듈(.risum) 하나 (PUT은 본문 그대로)
-         페르소나 = 그림 한 장 + 프롬프트 + 메모. 봇의 기본 페르소나는 PUT /api/bots/<id> {persona_id, fill_chats}
+  GET    /api/pgroups   GET|PUT|DELETE /api/pgroups/<id>   PUT {name, order: [버전 id…]}
+         페르소나 = 폴더(사람 하나) 안의 버전들. 버전 = 그림 한 장 + 프롬프트 + 메모. 봇의 기본 페르소나는 PUT /api/bots/<id> {persona_id, fill_chats}
   GET    /api/styles   GET|PUT|DELETE /api/styles/<id>   POST /api/styles {name, stype, prompt, negative, settings, images: [{data, meta}], folders, tags…}
   POST   /api/styles/<id>/images {images}   PUT|DELETE /api/style_images/<id> ({front: true} = 대표 그림)
   POST   /api/styles/<id>/bots {bot_id, role: official|mine}   DELETE /api/styles/<id>/bots/<bot_id>   그림체 ↔ 봇 잇기
@@ -183,6 +184,7 @@ CREATE INDEX IF NOT EXISTS intros_ver ON intros(version_id);
 CREATE TABLE IF NOT EXISTS personas (
   id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, image TEXT, prompt TEXT DEFAULT '', memo TEXT DEFAULT '',
   module TEXT, module_name TEXT, module_size INTEGER, created TEXT, updated TEXT, opened TEXT);
+CREATE TABLE IF NOT EXISTS pgroups (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, created TEXT, updated TEXT, opened TEXT);
 """
 DEFAULT_FOLDERS = [("운영 봇", "#F2B655"), ("자작 봇", "#5EC2B7"), ("받은 봇", "#B9A6F5"), ("해 볼 것", "#8FB8E8")]
 DEFAULT_SHELVES = ["공용 모듈", "프롬프트 프리셋", "참고 그림"]
@@ -292,6 +294,13 @@ class DB:
         for t in ("chats", "bots"):  # 채팅 로그의 페르소나 · 봇의 기본 페르소나 (NULL = 지정 안 함)
             if "persona_id" not in [r["name"] for r in self.c.execute(f"PRAGMA table_info({t})")]:
                 self.c.execute(f"ALTER TABLE {t} ADD COLUMN persona_id INTEGER")
+        if "group_id" not in [r["name"] for r in self.c.execute("PRAGMA table_info(personas)")]:  # 페르소나 = 폴더(사람 하나) 안의 버전
+            self.c.execute("ALTER TABLE personas ADD COLUMN group_id INTEGER")
+            self.c.execute("ALTER TABLE personas ADD COLUMN label TEXT DEFAULT ''")
+            self.c.execute("ALTER TABLE personas ADD COLUMN sort INTEGER DEFAULT 0")
+        for r in self.c.execute("SELECT id, name, created, updated, opened FROM personas WHERE group_id IS NULL").fetchall():  # 폴더 없는 페르소나는 제 폴더를 하나씩
+            gid = self.c.execute("INSERT INTO pgroups(name, created, updated, opened) VALUES (?,?,?,?)", (r["name"], r["created"], r["updated"], r["opened"])).lastrowid
+            self.c.execute("UPDATE personas SET group_id=? WHERE id=?", (gid, r["id"]))
         if "path" not in [r["name"] for r in self.c.execute("PRAGMA table_info(files)")]:  # 디스크 자리 (data 기준), moving = 옮기는 중인 예전 자리
             self.c.execute("ALTER TABLE files ADD COLUMN path TEXT")
             self.c.execute("ALTER TABLE files ADD COLUMN moving TEXT")
@@ -594,8 +603,8 @@ def info_text(bid, vdir=None, fnames=None):
         lines.append("태그: " + ", ".join(tags))
     if folders:
         lines.append("폴더: " + ", ".join(folders))
-    if b["persona_id"] and (p := db.q("SELECT name FROM personas WHERE id=?", (b["persona_id"],))):
-        lines.append(f"기본 페르소나: {p[0]['name']}")
+    if b["persona_id"] and (p := db.q("SELECT name, label FROM personas WHERE id=?", (b["persona_id"],))):
+        lines.append(f"기본 페르소나: {p[0]['name']}" + (f" ({p[0]['label']})" if p[0]["label"] else ""))
     for l in db.q("SELECT title, url FROM links WHERE bot_id=? ORDER BY sort, id", (bid,)):
         lines.append(f"링크: {l['title'] or ''} {l['url']}".replace("  ", " "))
     if (b["memo"] or "").strip():
@@ -1089,7 +1098,8 @@ def style_import(d):
 
 # ---- 페르소나: 그림 한 장 + 프롬프트 + 메모, 있으면 페르소나용 모듈(.risum) 하나 ----
 # 채팅 로그마다 페르소나를 고를 수 있고(기본은 지정 안 함), 봇에 기본 페르소나를 정해 두면 새 로그에 알아서 붙음
-PERSONA_FIELDS = {"name": 100, "prompt": 100_000, "memo": 20_000}
+# 한 사람의 여러 버전(탐험가용 김철수 · 헌터물 김철수)은 폴더(pgroups) 하나에 모음. 채팅 로그·봇은 버전(personas 줄)을 가리킴
+PERSONA_FIELDS = {"name": 100, "label": 60, "prompt": 100_000, "memo": 20_000}
 
 
 def persona_home(pid):
@@ -1097,20 +1107,63 @@ def persona_home(pid):
 
 
 def persona_rows():
-    return db.q("""SELECT p.id, p.name, p.image, p.module_name, p.created, p.updated, p.opened, length(p.prompt) AS plen,
+    return db.q("""SELECT p.id, p.name, p.label, p.group_id, g.name AS group_name, p.sort, p.image, p.module_name, p.created, p.updated, p.opened,
+                     length(p.prompt) AS plen,
                      (SELECT COUNT(*) FROM chats c WHERE c.persona_id=p.id) AS nchats,
                      (SELECT COUNT(*) FROM bots b WHERE b.persona_id=p.id) AS nbots
-                   FROM personas p ORDER BY COALESCE(p.opened, p.updated) DESC""")
+                   FROM personas p LEFT JOIN pgroups g ON g.id=p.group_id ORDER BY COALESCE(p.opened, p.updated) DESC""")
 
 
 def persona_detail(id):
-    p = db.q("SELECT * FROM personas WHERE id=?", (id,))
+    p = db.q("SELECT p.*, g.name AS group_name FROM personas p LEFT JOIN pgroups g ON g.id=p.group_id WHERE p.id=?", (id,))
     if not p:
         return None
     p = p[0]
     p["bots"] = db.q("SELECT id, name, cover FROM bots WHERE persona_id=? ORDER BY name", (id,))
     p["chats"] = chat_list(persona=id)
     return p
+
+
+def pgroup_rows():
+    return db.q("""SELECT g.id, g.name, g.created, g.updated, g.opened,
+                     (SELECT COUNT(*) FROM personas p WHERE p.group_id=g.id) AS nver,
+                     (SELECT image FROM personas p WHERE p.group_id=g.id AND p.image IS NOT NULL ORDER BY p.sort, p.id LIMIT 1) AS image,
+                     (SELECT group_concat(p.name || ' ' || COALESCE(p.label, ''), ' ') FROM personas p WHERE p.group_id=g.id) AS names,
+                     (SELECT group_concat(COALESCE(p.label, ''), char(31)) FROM (SELECT label FROM personas WHERE group_id=g.id ORDER BY sort, id) p) AS labels,
+                     EXISTS(SELECT 1 FROM personas p WHERE p.group_id=g.id AND p.module IS NOT NULL) AS has_module,
+                     (SELECT COUNT(*) FROM chats c JOIN personas p ON p.id=c.persona_id WHERE p.group_id=g.id) AS nchats,
+                     (SELECT COUNT(*) FROM bots b JOIN personas p ON p.id=b.persona_id WHERE p.group_id=g.id) AS nbots
+                   FROM pgroups g ORDER BY COALESCE(g.opened, g.updated) DESC""")
+
+
+def pgroup_detail(gid):
+    g = db.q("SELECT * FROM pgroups WHERE id=?", (gid,))
+    if not g:
+        return None
+    g = g[0]
+    g["versions"] = [persona_detail(r["id"]) for r in db.q("SELECT id FROM personas WHERE group_id=? ORDER BY sort, id", (gid,))]
+    return g
+
+
+def pgroup_ok(v):
+    return v if isinstance(v, int) and not isinstance(v, bool) and db.q("SELECT 1 FROM pgroups WHERE id=?", (v,)) else None
+
+
+def pgroup_new(name):
+    t = now()
+    gid, _ = db.x("INSERT INTO pgroups(name, created, updated, opened) VALUES (?,?,?,?)", ((name or "")[:100] or "이름 없는 페르소나", t, t, t))
+    return gid
+
+
+def pgroup_next(gid):
+    """폴더 맨 뒤 자리."""
+    return db.q("SELECT COALESCE(MAX(sort), 0) + 1 AS n FROM personas WHERE group_id=?", (gid,))[0]["n"]
+
+
+def pgroup_prune(gid):
+    """버전이 하나도 안 남은 폴더는 지움."""
+    if gid and not db.q("SELECT 1 FROM personas WHERE group_id=? LIMIT 1", (gid,)):
+        db.x("DELETE FROM pgroups WHERE id=?", (gid,))
 
 
 def persona_vals(d):
@@ -1144,7 +1197,7 @@ def set_persona_module(pid, src, name, size):
 
 
 def drop_persona(pid):
-    r = db.q("SELECT image FROM personas WHERE id=?", (pid,))
+    r = db.q("SELECT image, group_id FROM personas WHERE id=?", (pid,))
     if not r:
         return
     drop_persona_module(pid)
@@ -1153,6 +1206,7 @@ def drop_persona(pid):
     db.x("DELETE FROM personas WHERE id=?", (pid,))
     drop_media(r[0]["image"])
     prune(DATA / persona_home(pid))
+    pgroup_prune(r[0]["group_id"])
 
 
 def png_persona(raw, name, prompt, note):
@@ -1307,9 +1361,13 @@ def export_zip(out):
             linked = db.q("SELECT b.name, x.role FROM bot_styles x JOIN bots b ON b.id=x.bot_id WHERE x.style_id=?", (s["id"],))
             manifest["styles"].append({"name": s["name"], "dir": sdir[len(root) + 1:], "folders": [folders[i]["name"] for i in s["folders"] if i in folders], "bots": linked})
 
-        for x in db.q("SELECT * FROM personas ORDER BY id"):
-            pdir = slot(f"{root}/페르소나", x["name"] or "페르소나")
-            mp = {k: x[k] for k in ("id", "name", "prompt", "memo", "created")} | {"dir": pdir[len(root) + 1:]}
+        manifest["pgroups"] = [{k: g[k] for k in ("id", "name", "created")} for g in db.q("SELECT * FROM pgroups ORDER BY id")]
+        gdirs, nver = {}, {r["group_id"]: r["n"] for r in db.q("SELECT group_id, COUNT(*) AS n FROM personas GROUP BY group_id")}
+        for x in db.q("SELECT p.*, g.name AS group_name FROM personas p LEFT JOIN pgroups g ON g.id=p.group_id ORDER BY p.group_id, p.sort, p.id"):
+            if x["group_id"] not in gdirs:
+                gdirs[x["group_id"]] = slot(f"{root}/페르소나", x["group_name"] or x["name"] or "페르소나")
+            pdir = slot(gdirs[x["group_id"]], x["label"] or x["name"] or "버전") if nver.get(x["group_id"], 0) > 1 else gdirs[x["group_id"]]  # 버전이 여럿이면 버전마다 폴더
+            mp = {k: x[k] for k in ("id", "name", "label", "sort", "prompt", "memo", "created")} | {"group": x["group_id"], "dir": pdir[len(root) + 1:]}
             img = MEDIA / x["image"] if x["image"] and re.fullmatch(MEDIA_RE, x["image"]) else None
             if img and img.is_file():
                 raw = img.read_bytes()
@@ -1317,7 +1375,7 @@ def export_zip(out):
                 arc = slot(pdir, f"{x['name'] or '페르소나'}.png" if risu else "그림." + x["image"].rsplit(".", 1)[1])
                 z.writestr(zipfile.ZipInfo(arc, time.localtime()[:6]), risu or raw, compress_type=zipfile.ZIP_STORED)
                 mp["image"] = arc.rsplit("/", 1)[1]
-            lines = [f"이름: {x['name']}", "", "프롬프트", x["prompt"] or ""] + (["", "메모", x["memo"].strip()] if (x["memo"] or "").strip() else [])
+            lines = [f"이름: {x['name']}"] + ([f"버전: {x['label']}"] if x["label"] else []) + ["", "프롬프트", x["prompt"] or ""] + (["", "메모", x["memo"].strip()] if (x["memo"] or "").strip() else [])
             text(slot(pdir, "프롬프트.txt"), "\n".join(lines) + "\n")
             if x["module"] and (DATA / x["module"]).is_file():
                 arc = slot(pdir, x["module_name"] or "module.risum")
@@ -1344,13 +1402,15 @@ def import_zip(path, job):
         z = zipfile.ZipFile(path)
     except (zipfile.BadZipFile, OSError):
         raise ValueError("압축 파일이 아니거나 덜 받아진 파일이에요")
-    made = {"bots": [], "styles": [], "personas": [], "media": []}
+    made = {"bots": [], "styles": [], "personas": [], "pgroups": [], "media": []}
     try:
         with z:
             return _import_zip(z, job, made)
     except Exception:
         for pid in made["personas"]:
             drop_persona(pid)
+        for gid in made["pgroups"]:
+            pgroup_prune(gid)
         for bid in made["bots"]:
             for f in db.q("SELECT file, path FROM files WHERE bot_id=?", (bid,)):
                 drop_file(f)
@@ -1469,21 +1529,35 @@ def _import_zip(z, job, made):
                 db.x("DELETE FROM folders WHERE name=? AND COALESCE(scope, 'bot')='bot' AND id NOT IN (SELECT folder_id FROM bot_folders)", (n,))
     job["msg"] = "페르소나를 들이는 중"
     pmap = {}  # 내보낸 서재의 페르소나 id → 여기 id
-    same = {(r["name"], r["prompt"] or ""): r["id"] for r in db.q("SELECT id, name, prompt FROM personas")}
+    key = lambda name, label, prompt: (name, label or "", prompt or "")
+    same = {key(r["name"], r["label"], r["prompt"]): r["id"] for r in db.q("SELECT id, name, label, prompt FROM personas")}
+    gname = {g.get("id"): txt(g.get("name"), 100) for g in lst(m.get("pgroups")) if isinstance(g, dict)}
+    gmap, gown = {}, {txt(r["name"], 100): r["id"] for r in db.q("SELECT id, name FROM pgroups ORDER BY id")}  # 이름이 같은 폴더가 있으면 그 폴더에 넣음
     for mp in lst(m.get("personas")):
         if not isinstance(mp, dict):
             continue
         vals = persona_vals(mp)
         vals.setdefault("name", "이름 없는 페르소나")
-        if (vals["name"], vals.get("prompt", "")) in same:  # 이름·프롬프트가 같으면 있는 것을 씀
-            pmap[mp.get("id")] = same[vals["name"], vals.get("prompt", "")]
-            out["skipped_personas"].append(vals["name"])
+        k = key(vals["name"], vals.get("label"), vals.get("prompt"))
+        if k in same:  # 이름·버전·프롬프트가 같으면 있는 것을 씀
+            pmap[mp.get("id")] = same[k]
+            out["skipped_personas"].append(vals["name"] + (f" ({vals['label']})" if vals.get("label") else ""))
             continue
+        g = mp.get("group") if isinstance(mp.get("group"), int) else None
+        gk = g if g is not None else ("old", mp.get("id"))  # 예전 내보내기(폴더 없음)는 이름이 폴더
+        if gk not in gmap:
+            gn = (gname.get(g) if g is not None else None) or vals["name"]
+            if gn not in gown:
+                gown[gn] = pgroup_new(gn)
+                made["pgroups"].append(gown[gn])
+            gmap[gk] = gown[gn]
+        gid = gmap[gk]
         pd = txt(mp.get("dir"), 2000)
-        vals |= {"image": media(f"{pd}/{mp['image']}") if mp.get("image") else None, "created": when(mp.get("created")), "updated": now()}
+        vals |= {"image": media(f"{pd}/{mp['image']}") if mp.get("image") else None, "created": when(mp.get("created")), "updated": now(),
+                 "group_id": gid, "sort": pgroup_next(gid)}
         pid, _ = db.x(f"INSERT INTO personas({', '.join(vals)}) VALUES ({','.join('?' * len(vals))})", tuple(vals.values()))
         made["personas"].append(pid)
-        same[vals["name"], vals.get("prompt", "")] = pid
+        same[k] = pid
         if info := ent(f"{pd}/{mp.get('module')}") if mp.get("module") else None:
             TMP.mkdir(exist_ok=True)
             tmp = TMP / secrets.token_hex(12)
@@ -1691,7 +1765,7 @@ def bot_detail(id):
         b["rx"] = json.loads(b.get("rx") or "{}")
     except ValueError:
         b["rx"] = {}
-    p = db.q("SELECT id, name, image FROM personas WHERE id=?", (b["persona_id"],)) if b.get("persona_id") else []
+    p = db.q("SELECT id, name, label, group_id, image FROM personas WHERE id=?", (b["persona_id"],)) if b.get("persona_id") else []
     b["persona"] = p[0] if p else None
     return b
 
@@ -2075,7 +2149,7 @@ def current_version(bot_id, create=True):
 
 def chat_list(bot_id=None, persona=None):
     sql = """SELECT c.id, c.bot_id, c.title, c.memo, c.source, c.count, c.first_at, c.last_at, c.created, c.updated, COALESCE(c.series, '') AS series, c.ep,
-               b.name AS bot_name, b.cover AS bot_cover, b.persona_id AS bot_persona, c.persona_id, p.name AS persona_name, p.image AS persona_image,
+               b.name AS bot_name, b.cover AS bot_cover, b.persona_id AS bot_persona, c.persona_id, p.name AS persona_name, p.label AS persona_label, p.group_id AS persona_group, p.image AS persona_image,
                (SELECT COUNT(*) FROM marks m WHERE m.chat_id=c.id) AS marks,
                (SELECT COUNT(*) FROM marks m WHERE m.chat_id=c.id AND m.image IS NOT NULL) AS pics
              FROM chats c JOIN bots b ON b.id=c.bot_id LEFT JOIN personas p ON p.id=c.persona_id"""
@@ -2105,7 +2179,7 @@ def state():
         "items": db.q("SELECT COUNT(*) AS n FROM bots WHERE COALESCE(itype, '') != ''")[0]["n"],
         "stypes": db.q("""SELECT t.*, (SELECT COUNT(*) FROM styles s WHERE s.stype=t.key) AS count FROM stypes t ORDER BY sort, key"""),
         "styles": db.q("SELECT COUNT(*) AS n FROM styles")[0]["n"],
-        "personas": db.q("SELECT COUNT(*) AS n FROM personas")[0]["n"],
+        "personas": db.q("SELECT COUNT(*) AS n FROM pgroups")[0]["n"],
         "shelves": db.q("""SELECT s.*, (SELECT COUNT(*) FROM files f WHERE f.shelf_id=s.id AND f.bot_id IS NULL) AS count
                            FROM shelves s ORDER BY sort, id"""),
         "bots": db.q("SELECT COUNT(*) AS n FROM bots WHERE COALESCE(itype, '') = ''")[0]["n"],
@@ -2459,6 +2533,15 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send(200, style_rows())
             if p == ["personas"]:
                 return self.send(200, persona_rows())
+            if p == ["pgroups"]:
+                return self.send(200, pgroup_rows())
+            if len(p) == 2 and p[0] == "pgroups" and p[1].isdigit():
+                g = pgroup_detail(int(p[1]))
+                if not g:
+                    return self.send(404, {"error": "페르소나가 없어요"})
+                if params.get("open"):
+                    db.x("UPDATE pgroups SET opened=? WHERE id=?", (now(), g["id"]))
+                return self.send(200, g)
             if len(p) in (2, 3) and p[0] == "personas" and p[1].isdigit() and p[2:] in ([], ["module"]):
                 x = persona_detail(int(p[1]))
                 if not x:
@@ -2548,6 +2631,8 @@ class Handler(BaseHTTPRequestHandler):
                 vals.setdefault("name", "이름 없는 페르소나")
                 if d.get("image"):
                     vals["image"] = save_data_url(d["image"])
+                vals["group_id"] = pgroup_ok(d.get("group_id")) or pgroup_new(vals["name"])  # 폴더를 안 고르면 이름으로 새 폴더
+                vals["sort"] = pgroup_next(vals["group_id"])
                 vals["created"] = vals["updated"] = vals["opened"] = now()
                 pid, _ = db.x(f"INSERT INTO personas({', '.join(vals)}) VALUES ({','.join('?' * len(vals))})", tuple(vals.values()))
                 return self.send(200, persona_detail(pid))
@@ -2811,7 +2896,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send(200, style_detail(sid))
             if p and len(p) == 2 and p[0] == "personas" and p[1].isdigit():
                 pid = int(p[1])
-                old = db.q("SELECT image FROM personas WHERE id=?", (pid,))
+                old = db.q("SELECT image, name, group_id FROM personas WHERE id=?", (pid,))
                 if not old:
                     return self.send(404, {"error": "페르소나가 없어요"})
                 vals = persona_vals(d)
@@ -2819,12 +2904,29 @@ class Handler(BaseHTTPRequestHandler):
                     vals["image"] = save_data_url(d["image"])
                 elif d.get("drop_image"):
                     vals["image"] = None
+                if "group_id" in d:  # 다른 폴더로 옮기기 (null = 이 버전만 새 폴더로)
+                    gid = pgroup_ok(d["group_id"]) or pgroup_new(vals.get("name") or old[0]["name"])
+                    if gid != old[0]["group_id"]:
+                        vals |= {"group_id": gid, "sort": pgroup_next(gid)}
                 if vals:
                     vals["updated"] = now()
                     db.x(f"UPDATE personas SET {', '.join(k + '=?' for k in vals)} WHERE id=?", (*vals.values(), pid))
                 if "image" in vals:
                     drop_media(old[0]["image"])
+                if "group_id" in vals:
+                    pgroup_prune(old[0]["group_id"])
                 return self.send(200, persona_detail(pid))
+            if p and len(p) == 2 and p[0] == "pgroups" and p[1].isdigit():  # {name, order: [버전 id…]} (맨 앞 = 대표)
+                gid = int(p[1])
+                if not db.q("SELECT 1 FROM pgroups WHERE id=?", (gid,)):
+                    return self.send(404, {"error": "페르소나가 없어요"})
+                if name := str(d.get("name") or "").strip()[:100]:
+                    db.x("UPDATE pgroups SET name=?, updated=? WHERE id=?", (name, now(), gid))
+                if isinstance(d.get("order"), list):
+                    for i, vid in enumerate(d["order"], 1):
+                        if isinstance(vid, int):
+                            db.x("UPDATE personas SET sort=? WHERE id=? AND group_id=?", (i, vid, gid))
+                return self.send(200, pgroup_detail(gid))
             if p and len(p) == 2 and p[0] == "style_images" and p[1].isdigit():
                 g = db.q("SELECT style_id FROM style_images WHERE id=?", (int(p[1]),))
                 if not g:
@@ -3107,7 +3209,16 @@ class Handler(BaseHTTPRequestHandler):
                 if p[2:] == ["module"]:
                     drop_persona_module(pid)
                     return self.send(200, persona_detail(pid))
+                gid = db.q("SELECT group_id FROM personas WHERE id=?", (pid,))[0]["group_id"]
                 drop_persona(pid)
+                return self.send(200, {"ok": True, "group": gid if pgroup_ok(gid) else None})
+            if p and len(p) == 2 and p[0] == "pgroups" and p[1].isdigit():  # 폴더째: 버전 전부
+                gid = int(p[1])
+                if not db.q("SELECT 1 FROM pgroups WHERE id=?", (gid,)):
+                    return self.send(404, {"error": "페르소나가 없어요"})
+                for r in db.q("SELECT id FROM personas WHERE group_id=?", (gid,)):
+                    drop_persona(r["id"])
+                pgroup_prune(gid)
                 return self.send(200, {"ok": True})
             if p and len(p) == 4 and p[0] == "styles" and p[1].isdigit() and p[2] == "bots" and p[3].isdigit():
                 db.x("DELETE FROM bot_styles WHERE style_id=? AND bot_id=?", (int(p[1]), int(p[3])))
