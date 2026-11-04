@@ -32,9 +32,19 @@ API (JSON):
          자료 = bots 줄 중 itype이 있는 것 (봇과 같은 페이지·버전·소개글을 씀, 자료함에만 나옴). 폴더도 scope bot|item으로 따로.
   PUT    /api/upload?bot=&version=|shelf=&kind=&name=    파일 원본(본문 그대로)
   GET    /api/files?all=1   PUT|DELETE /api/files/<id>
-  GET    /api/chats?bot=    POST /api/chats    GET|PUT|DELETE /api/chats/<id>
+  GET    /api/chats?bot=    POST /api/chats    GET|PUT|DELETE /api/chats/<id>   (persona_id: null = 지정 안 함, POST에서 빼면 봇의 기본 페르소나)
+  GET    /api/personas   POST /api/personas {group_id?, name, label, prompt, memo, image(data URL)}   GET|PUT|DELETE /api/personas/<id> (PUT drop_image, group_id)
+  POST   /api/personas/<id>/copy {label, group_id: 빼면 같은 폴더 · null이면 새 폴더}   버전 복제 (그림·자료도 새 파일로)
+  PUT    /api/pgroups/<id>/files?name=&persona=(빈칸 = 폴더 공통)&kind=   페르소나 자료실에 파일 원본(본문 그대로)
+  GET|PUT|DELETE /api/pfiles/<id> (PUT {name, kind, note, persona_id})   GET /api/pfiles/<id>/lore|assets|asset/<n>|masset/<n>   로어북 · 에셋 (봇 파일과 같은 모양)
+  GET    /api/pgroups   GET|PUT|DELETE /api/pgroups/<id>   PUT {name, ptype, order: [버전 id…]}
+  POST   /api/pgroups/<id>/images {image(data URL), persona_id(null = 폴더 공통), memo}   PUT|DELETE /api/pimages/<id> {memo, persona_id}   갤러리
+  POST   /api/bots/<id>/images {image(data URL), chat_id, idx(메시지 0부터), memo}   PUT|DELETE /api/bimages/<id> {memo, chat_id, idx}   봇 그림 (채팅하며 만든 그림)
+         페르소나 = 폴더(사람 하나) 안의 버전들. 버전 = 그림 한 장 + 프롬프트 + 메모. 봇의 기본 페르소나는 PUT /api/bots/<id> {persona_id, fill_chats}
   GET    /api/styles   GET|PUT|DELETE /api/styles/<id>   POST /api/styles {name, stype, prompt, negative, settings, images: [{data, meta}], folders, tags…}
-  POST   /api/styles/<id>/images {images}   PUT|DELETE /api/style_images/<id> ({front: true} = 대표 그림)
+  POST   /api/styles/<id>/images {images, variant_id}   PUT|DELETE /api/style_images/<id> ({front: true} = 대표 그림)
+  POST   /api/styles/<id>/variants {label, prompt, negative, chars, settings, memo}   PUT|DELETE /api/style_variants/<id>   변형 (styles 줄 = '기본' 변형, 이름은 vlabel)
+  POST   /api/styles/<id>/gallery {image, variant_id(null = 공통, 0 = 기본), memo, meta}   PUT|DELETE /api/sgallery/<id>   갤러리
   POST   /api/styles/<id>/bots {bot_id, role: official|mine}   DELETE /api/styles/<id>/bots/<bot_id>   그림체 ↔ 봇 잇기
   GET    /api/export                     전부 내보내기 zip (봇/<폴더>/<봇>/버전/원본 · 채팅 로그 · 그림체 · 봇카이브.json)
   POST   /api/import {name, size, key}  →  {id, have}   PUT /api/import/<id>?at=<받아 둔 크기> (조각, 64MB까지)
@@ -59,11 +69,13 @@ import secrets
 import shutil
 import socket
 import sqlite3
+import struct
 import threading
 import time
 import urllib.error
 import urllib.request
 import zipfile
+import zlib
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from html import escape, unescape
@@ -80,7 +92,7 @@ HOST = os.environ.get("HOST", "127.0.0.1")  # 기본은 이 컴퓨터에서만. 
 MEDIA = DATA / "media"
 FILES = DATA / "files"     # 예전 자리 (무작위 이름) — 켤 때 봇 폴더로 옮기고 비면 지움
 TMP = DATA / "tmp"         # 올리는 중인 파일
-STORE_ROOTS = {"bots", "items", "loose", "tmp", "files"}  # 원본 파일이 있을 수 있는 data 아래 폴더
+STORE_ROOTS = {"bots", "items", "loose", "tmp", "files", "personas"}  # 원본 파일이 있을 수 있는 data 아래 폴더
 KST = timezone(timedelta(hours=9))
 KEEP_BACKUPS = 30
 MAX_BODY = 80_000_000      # 채팅 로그 JSON (그림은 빼고 글만 오니 이 정도면 충분)
@@ -112,9 +124,10 @@ DEFAULT_ITYPES = [("module", "모듈", "#B9A6F5"), ("preset", "프리셋", "#7FD
                   ("plugin", "플러그인", "#9CCB6E"), ("etc", "기타", "#C7C5CC")]  # 자료 종류 기본 (키 고정, etc는 지운 종류가 가는 곳)
 DEFAULT_STYPES = [("cel", "셀화", "#8FB8E8"), ("paint", "두꺼운 칠", "#C9A27A"), ("water", "수채", "#7FD1E8"),
                   ("semi", "반실사", "#E89BCB"), ("etc", "기타", "#C7C5CC")]  # 그림체 분류 기본 (etc는 지운 분류가 가는 곳)
-LABELS = {"statuses": ("상태", 12, "s"), "itypes": ("종류", 20, "t"), "stypes": ("분류", 20, "g")}  # 이름표 표: 부를 이름, 최대 개수, 더한 키 앞글자
-LABEL_MOVE = {"statuses": ("bots", "status", "later"), "itypes": ("bots", "itype", "etc"), "stypes": ("styles", "stype", "etc")}  # 지울 때 옮길 곳
-STYLE_FIELDS = {"name": 200, "creator": 200, "source": 1000, "prompt": 20000, "negative": 20000, "memo": 20000}  # 글자 수 한도
+DEFAULT_PTYPES = [("male", "남캐", "#8FB8E8"), ("female", "여캐", "#E89BCB")]  # 페르소나 분류 기본 (지운 분류는 '분류 없음' = '')
+LABELS = {"statuses": ("상태", 12, "s"), "itypes": ("종류", 20, "t"), "stypes": ("분류", 20, "g"), "ptypes": ("분류", 20, "p")}  # 이름표 표: 부를 이름, 최대 개수, 더한 키 앞글자
+LABEL_MOVE = {"statuses": ("bots", "status", "later"), "itypes": ("bots", "itype", "etc"), "stypes": ("styles", "stype", "etc"), "ptypes": ("pgroups", "ptype", "")}  # 지울 때 옮길 곳
+STYLE_FIELDS = {"vlabel": 60, "name": 200, "creator": 200, "source": 1000, "prompt": 20000, "negative": 20000, "memo": 20000}  # 글자 수 한도
 DEFAULT_STATUSES = [("playing", "하는 중", "#F2B655"), ("later", "찜", "#8FB8E8"), ("done", "끝", "#5EC2B7")]  # 키는 고정 (홈이 playing을 씀)
 KINDS = {"card", "module", "preset", "lore", "plugin", "images", "regex", "memo", "etc"}
 COLORS = {"#F2B655", "#5EC2B7", "#B9A6F5", "#8FB8E8", "#F08A8A", "#9CCB6E", "#E89BCB", "#C9A27A", "#7FD1E8", "#C7C5CC"}
@@ -141,6 +154,12 @@ CREATE TABLE IF NOT EXISTS sessions (token TEXT PRIMARY KEY, created TEXT, expir
 CREATE TABLE IF NOT EXISTS styles (id INTEGER PRIMARY KEY, name TEXT NOT NULL, creator TEXT DEFAULT '', source TEXT DEFAULT '', stype TEXT DEFAULT 'etc',
   prompt TEXT DEFAULT '', negative TEXT DEFAULT '', settings TEXT DEFAULT '{}', memo TEXT DEFAULT '', tags TEXT DEFAULT '[]', created TEXT, updated TEXT, opened TEXT);
 CREATE TABLE IF NOT EXISTS style_images (id INTEGER PRIMARY KEY, style_id INTEGER REFERENCES styles(id) ON DELETE CASCADE, image TEXT, sort INTEGER DEFAULT 0, meta TEXT DEFAULT '{}', created TEXT);
+CREATE TABLE IF NOT EXISTS style_variants (id INTEGER PRIMARY KEY AUTOINCREMENT, style_id INTEGER REFERENCES styles(id) ON DELETE CASCADE, label TEXT DEFAULT '',
+  prompt TEXT DEFAULT '', negative TEXT DEFAULT '', chars TEXT DEFAULT '[]', settings TEXT DEFAULT '{}', memo TEXT DEFAULT '', sort INTEGER DEFAULT 0, created TEXT, updated TEXT);
+CREATE INDEX IF NOT EXISTS style_variants_style ON style_variants(style_id);
+CREATE TABLE IF NOT EXISTS sgallery (id INTEGER PRIMARY KEY AUTOINCREMENT, style_id INTEGER REFERENCES styles(id) ON DELETE CASCADE,
+  variant_id INTEGER, image TEXT NOT NULL, memo TEXT DEFAULT '', meta TEXT DEFAULT '{}', created TEXT);
+CREATE INDEX IF NOT EXISTS sgallery_style ON sgallery(style_id);
 CREATE TABLE IF NOT EXISTS style_folders (style_id INTEGER REFERENCES styles(id) ON DELETE CASCADE, folder_id INTEGER REFERENCES folders(id) ON DELETE CASCADE, PRIMARY KEY (style_id, folder_id));
 CREATE TABLE IF NOT EXISTS bot_styles (bot_id INTEGER REFERENCES bots(id) ON DELETE CASCADE, style_id INTEGER REFERENCES styles(id) ON DELETE CASCADE, role TEXT DEFAULT 'mine', PRIMARY KEY (bot_id, style_id));
 CREATE TABLE IF NOT EXISTS itypes (key TEXT PRIMARY KEY, name TEXT NOT NULL, color TEXT, sort INTEGER DEFAULT 0, builtin INTEGER DEFAULT 0);
@@ -175,6 +194,20 @@ CREATE TABLE IF NOT EXISTS intros (
   id INTEGER PRIMARY KEY AUTOINCREMENT, version_id INTEGER REFERENCES versions(id) ON DELETE CASCADE,
   title TEXT DEFAULT '', html TEXT DEFAULT '', url TEXT DEFAULT '', author TEXT DEFAULT '', at TEXT, sort INTEGER DEFAULT 0);
 CREATE INDEX IF NOT EXISTS intros_ver ON intros(version_id);
+CREATE TABLE IF NOT EXISTS personas (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, image TEXT, prompt TEXT DEFAULT '', memo TEXT DEFAULT '',
+  module TEXT, module_name TEXT, module_size INTEGER, created TEXT, updated TEXT, opened TEXT);
+CREATE TABLE IF NOT EXISTS pgroups (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, created TEXT, updated TEXT, opened TEXT);
+CREATE TABLE IF NOT EXISTS pimages (id INTEGER PRIMARY KEY AUTOINCREMENT, group_id INTEGER REFERENCES pgroups(id) ON DELETE CASCADE,
+  persona_id INTEGER, image TEXT NOT NULL, memo TEXT DEFAULT '', created TEXT);
+CREATE INDEX IF NOT EXISTS pimages_group ON pimages(group_id);
+CREATE TABLE IF NOT EXISTS bimages (id INTEGER PRIMARY KEY AUTOINCREMENT, bot_id INTEGER REFERENCES bots(id) ON DELETE CASCADE,
+  chat_id INTEGER REFERENCES chats(id) ON DELETE SET NULL, idx INTEGER, image TEXT, memo TEXT DEFAULT '', created TEXT);
+CREATE INDEX IF NOT EXISTS bimages_bot ON bimages(bot_id);
+CREATE TABLE IF NOT EXISTS pfiles (id INTEGER PRIMARY KEY AUTOINCREMENT, group_id INTEGER REFERENCES pgroups(id) ON DELETE CASCADE,
+  persona_id INTEGER, kind TEXT DEFAULT 'etc', name TEXT, note TEXT DEFAULT '', path TEXT, size INTEGER, created TEXT);
+CREATE INDEX IF NOT EXISTS pfiles_group ON pfiles(group_id);
+CREATE TABLE IF NOT EXISTS ptypes (key TEXT PRIMARY KEY, name TEXT NOT NULL, color TEXT, sort INTEGER DEFAULT 0, builtin INTEGER DEFAULT 0);
 """
 DEFAULT_FOLDERS = [("운영 봇", "#F2B655"), ("자작 봇", "#5EC2B7"), ("받은 봇", "#B9A6F5"), ("해 볼 것", "#8FB8E8")]
 DEFAULT_SHELVES = ["공용 모듈", "프롬프트 프리셋", "참고 그림"]
@@ -281,6 +314,28 @@ class DB:
             self.c.execute("ALTER TABLE styles ADD COLUMN chars TEXT DEFAULT '[]'")
         if "ep" not in [r["name"] for r in self.c.execute("PRAGMA table_info(chats)")]:  # 시리즈 화 번호 직접 지정 (NULL = 제목에서 읽음)
             self.c.execute("ALTER TABLE chats ADD COLUMN ep INTEGER")
+        for t in ("chats", "bots"):  # 채팅 로그의 페르소나 · 봇의 기본 페르소나 (NULL = 지정 안 함)
+            if "persona_id" not in [r["name"] for r in self.c.execute(f"PRAGMA table_info({t})")]:
+                self.c.execute(f"ALTER TABLE {t} ADD COLUMN persona_id INTEGER")
+        if "group_id" not in [r["name"] for r in self.c.execute("PRAGMA table_info(personas)")]:  # 페르소나 = 폴더(사람 하나) 안의 버전
+            self.c.execute("ALTER TABLE personas ADD COLUMN group_id INTEGER")
+            self.c.execute("ALTER TABLE personas ADD COLUMN label TEXT DEFAULT ''")
+            self.c.execute("ALTER TABLE personas ADD COLUMN sort INTEGER DEFAULT 0")
+        if "vlabel" not in [r["name"] for r in self.c.execute("PRAGMA table_info(styles)")]:  # 그림체 변형: styles 줄 = '기본' 변형(이름 vlabel), 나머지는 style_variants
+            self.c.execute("ALTER TABLE styles ADD COLUMN vlabel TEXT DEFAULT ''")
+            self.c.execute("ALTER TABLE style_images ADD COLUMN variant_id INTEGER")  # NULL = 기본 변형의 견본
+        if "ptype" not in [r["name"] for r in self.c.execute("PRAGMA table_info(pgroups)")]:  # 페르소나 분류 ('' = 분류 없음)
+            self.c.execute("ALTER TABLE pgroups ADD COLUMN ptype TEXT DEFAULT ''")
+        if not self.c.execute("SELECT 1 FROM ptypes LIMIT 1").fetchone():
+            for i, (k, n, col) in enumerate(DEFAULT_PTYPES):
+                self.c.execute("INSERT INTO ptypes(key, name, color, sort, builtin) VALUES (?,?,?,?,1)", (k, n, col, i))
+        for r in self.c.execute("SELECT id, name, created, updated, opened FROM personas WHERE group_id IS NULL").fetchall():  # 폴더 없는 페르소나는 제 폴더를 하나씩
+            gid = self.c.execute("INSERT INTO pgroups(name, created, updated, opened) VALUES (?,?,?,?)", (r["name"], r["created"], r["updated"], r["opened"])).lastrowid
+            self.c.execute("UPDATE personas SET group_id=? WHERE id=?", (gid, r["id"]))
+        for r in self.c.execute("SELECT id, group_id, module, module_name, module_size, updated FROM personas WHERE module IS NOT NULL").fetchall():  # 버전마다 모듈 하나 → 자료실
+            self.c.execute("INSERT INTO pfiles(group_id, persona_id, kind, name, path, size, created) VALUES (?,?,'module',?,?,?,?)",
+                           (r["group_id"], r["id"], r["module_name"] or r["module"].rsplit("/", 1)[-1], r["module"], r["module_size"], r["updated"]))
+            self.c.execute("UPDATE personas SET module=NULL, module_name=NULL, module_size=NULL WHERE id=?", (r["id"],))
         if "path" not in [r["name"] for r in self.c.execute("PRAGMA table_info(files)")]:  # 디스크 자리 (data 기준), moving = 옮기는 중인 예전 자리
             self.c.execute("ALTER TABLE files ADD COLUMN path TEXT")
             self.c.execute("ALTER TABLE files ADD COLUMN moving TEXT")
@@ -461,6 +516,8 @@ def file_home(f):
 
 def fpath(token):
     """파일 토큰 → 디스크 경로 (옮기는 사이에는 예전 자리)."""
+    if token.startswith("pm:"):  # 페르소나 자료 (pfile_token)
+        return DATA / token[3:].split("?", 1)[0]
     r = db.q("SELECT path, moving FROM files WHERE file=?", (token,))
     if not r or not r[0]["path"]:
         return FILES / token
@@ -583,6 +640,8 @@ def info_text(bid, vdir=None, fnames=None):
         lines.append("태그: " + ", ".join(tags))
     if folders:
         lines.append("폴더: " + ", ".join(folders))
+    if b["persona_id"] and (p := db.q("SELECT name, label FROM personas WHERE id=?", (b["persona_id"],))):
+        lines.append(f"기본 페르소나: {p[0]['name']}" + (f" ({p[0]['label']})" if p[0]["label"] else ""))
     for l in db.q("SELECT title, url FROM links WHERE bot_id=? ORDER BY sort, id", (bid,)):
         lines.append(f"링크: {l['title'] or ''} {l['url']}".replace("  ", " "))
     if (b["memo"] or "").strip():
@@ -951,8 +1010,9 @@ def tags_of(raw):
 # ---- 그림체 ----
 def style_rows():
     rows = db.q("""SELECT s.id, s.name, s.creator, s.stype, s.tags, s.created, s.updated, s.opened,
-                     (SELECT image FROM style_images i WHERE i.style_id=s.id ORDER BY sort, id LIMIT 1) AS cover,
+                     (SELECT image FROM style_images i WHERE i.style_id=s.id ORDER BY i.variant_id IS NOT NULL, sort, id LIMIT 1) AS cover,
                      (SELECT COUNT(*) FROM style_images i WHERE i.style_id=s.id) AS nimg,
+                     (SELECT COUNT(*) FROM style_variants v WHERE v.style_id=s.id) AS nvar,
                      (SELECT COUNT(*) FROM bot_styles b WHERE b.style_id=s.id) AS nbots
                    FROM styles s ORDER BY COALESCE(s.opened, s.updated) DESC""")
     fm = {}
@@ -978,12 +1038,20 @@ def style_detail(id):
         s["chars"] = json.loads(s.get("chars") or "[]")
     except ValueError:
         s["chars"] = []
-    s["images"] = db.q("SELECT id, image, meta FROM style_images WHERE style_id=? ORDER BY sort, id", (id,))
-    for i in s["images"]:
+    s["images"] = db.q("SELECT id, image, meta, variant_id FROM style_images WHERE style_id=? ORDER BY sort, id", (id,))
+    s["variants"] = db.q("SELECT id, label, prompt, negative, chars, settings, memo, created FROM style_variants WHERE style_id=? ORDER BY sort, id", (id,))
+    s["gallery"] = db.q("SELECT id, variant_id, image, memo, meta, created FROM sgallery WHERE style_id=? ORDER BY id DESC", (id,))
+    for i in s["images"] + s["gallery"]:
         try:
             i["meta"] = json.loads(i["meta"] or "{}")
         except ValueError:
             i["meta"] = {}
+    for v in s["variants"]:
+        for k, empty in (("chars", []), ("settings", {})):
+            try:
+                v[k] = json.loads(v[k] or json.dumps(empty))
+            except ValueError:
+                v[k] = empty
     s["folders"] = [x["folder_id"] for x in db.q("SELECT folder_id FROM style_folders WHERE style_id=?", (id,))]
     s["bots"] = db.q("""SELECT b.id, b.name, b.cover, bs.role FROM bot_styles bs JOIN bots b ON b.id=bs.bot_id
                         WHERE bs.style_id=? ORDER BY bs.role='official' DESC, b.name""", (id,))
@@ -1012,8 +1080,8 @@ def set_style_folders(sid, ids):
     db.many("INSERT OR IGNORE INTO style_folders(style_id, folder_id) VALUES (?,?)", [(sid, int(i)) for i in ids if str(i).isdigit() and int(i) in ok])
 
 
-def add_style_images(sid, imgs):
-    """견본 그림 넣기 (data URL + 그림에서 읽은 프롬프트 같은 메타). 한 번에 40장까지."""
+def add_style_images(sid, imgs, vid=None):
+    """견본 그림 넣기 (data URL + 그림에서 읽은 프롬프트 같은 메타). 한 번에 40장까지. vid = 변형 (None = 기본)."""
     n = db.q("SELECT COALESCE(MAX(sort), 0) AS n FROM style_images WHERE style_id=?", (sid,))[0]["n"]
     for x in (imgs if isinstance(imgs, list) else [])[:40]:
         if not isinstance(x, dict):
@@ -1021,7 +1089,7 @@ def add_style_images(sid, imgs):
         name = save_data_url(x.get("data"))
         n += 1
         meta = json.dumps(x.get("meta") if isinstance(x.get("meta"), dict) else {}, ensure_ascii=False)[:30000]
-        db.x("INSERT INTO style_images(style_id, image, sort, meta, created) VALUES (?,?,?,?,?)", (sid, name, n, meta, now()))
+        db.x("INSERT INTO style_images(style_id, image, sort, meta, created, variant_id) VALUES (?,?,?,?,?,?)", (sid, name, n, meta, now(), vid))
     db.x("UPDATE styles SET updated=? WHERE id=?", (now(), sid))
 
 
@@ -1035,28 +1103,80 @@ def new_style(d):
     return sid
 
 
+def variant_vals(d):
+    """변형 칸 (이름 · 프롬프트 · 네거티브 · 캐릭터 · 설정 · 메모)."""
+    vals = {k: v for k, v in style_vals(d).items() if k in ("prompt", "negative", "memo", "settings", "chars")}
+    if "label" in d:
+        vals["label"] = str(d["label"] or "").strip()[:60]
+    return vals
+
+
+def style_variant_ok(sid, vid):
+    """그 그림체의 변형 id (0 = 기본 → None). 없는 변형이면 False."""
+    if vid in (0, None):
+        return None
+    return vid if isinstance(vid, int) and db.q("SELECT 1 FROM style_variants WHERE id=? AND style_id=?", (vid, sid)) else False
+
+
+def new_variant(sid, d):
+    vals = variant_vals(d) | {"style_id": sid, "created": now(), "updated": now(),
+                              "sort": db.q("SELECT COALESCE(MAX(sort), 0) + 1 AS n FROM style_variants WHERE style_id=?", (sid,))[0]["n"]}
+    vid, _ = db.x(f"INSERT INTO style_variants({', '.join(vals)}) VALUES ({','.join('?' * len(vals))})", tuple(vals.values()))
+    return vid
+
+
+def add_sgallery(sid, vid, raw_or_url, memo="", meta=None, ext=None):
+    """갤러리 그림 하나 (data URL 또는 바이트+확장자). vid: None = 그림체 공통, 0 = 기본 변형."""
+    if ext:
+        name = f"{secrets.token_hex(10)}.{ext}"
+        (MEDIA / name).write_bytes(raw_or_url)
+    else:
+        name = save_data_url(raw_or_url)
+    gid, _ = db.x("INSERT INTO sgallery(style_id, variant_id, image, memo, meta, created) VALUES (?,?,?,?,?,?)",
+                  (sid, vid, name, str(memo or "").strip()[:2000], json.dumps(meta if isinstance(meta, dict) else {}, ensure_ascii=False)[:30000], now()))
+    return gid
+
+
+def sgallery_rows(sid):
+    rows = db.q("SELECT id, variant_id, image, memo, meta, created FROM sgallery WHERE style_id=? ORDER BY id DESC", (sid,))
+    for r in rows:
+        try:
+            r["meta"] = json.loads(r["meta"] or "{}")
+        except ValueError:
+            r["meta"] = {}
+    return rows
+
+
 STYLE_MIME = {"png": "image/png", "jpg": "image/jpeg", "webp": "image/webp"}
 
 
-def style_export(ids):
-    """나눠 줄 그림체 파일 — 그림은 data URL로 넣음 (폴더·이은 봇은 빼고)."""
+def style_export(ids, gallery=None):
+    """나눠 줄 그림체 파일 — 그림은 data URL로 넣음 (폴더·이은 봇은 빼고). 변형은 variants, 견본은 변형마다.
+    gallery: None = 갤러리 빼기, 함수 = 갤러리 그림마다 불러 {file} 자리를 받음 (전부 내보내기 압축 파일 안 '갤러리/')"""
+    def data(g):
+        ext = g["image"].rsplit(".", 1)[1]
+        f = MEDIA / g["image"]
+        return f"data:{STYLE_MIME[ext]};base64,{base64.b64encode(f.read_bytes()).decode()}" if ext in STYLE_MIME and f.is_file() else None
     out = []
     for i in ids:
         s = style_detail(i)
         if not s:
             continue
-        imgs = []
-        for g in s["images"]:
-            ext = g["image"].rsplit(".", 1)[1]
-            f = MEDIA / g["image"]
-            if ext in STYLE_MIME and f.is_file():
-                imgs.append({"data": f"data:{STYLE_MIME[ext]};base64,{base64.b64encode(f.read_bytes()).decode()}", "meta": g["meta"]})
+        imgs = lambda vid: [{"data": u, "meta": g["meta"]} for g in s["images"] if g["variant_id"] == vid and (u := data(g))]
         st = db.q("SELECT name FROM stypes WHERE key=?", (s["stype"],))
-        out.append({k: s[k] for k in ("name", "creator", "source", "prompt", "negative", "chars", "settings", "memo", "tags")} | {"stype_name": st[0]["name"] if st else "", "images": imgs})
+        e = {k: s[k] for k in ("name", "vlabel", "creator", "source", "prompt", "negative", "chars", "settings", "memo", "tags")} | {"stype_name": st[0]["name"] if st else "", "images": imgs(None)}
+        idx = {v["id"]: n for n, v in enumerate(s["variants"], 1)}  # 변형 자리 (0 = 기본)
+        e["variants"] = [{k: v[k] for k in ("label", "prompt", "negative", "chars", "settings", "memo")} | {"images": imgs(v["id"])} for v in s["variants"]]
+        if gallery:
+            e["gallery"] = []
+            for g in reversed(s["gallery"]):
+                if (f := gallery(g)) is not None:
+                    e["gallery"].append({"file": f, "variant": None if g["variant_id"] is None else idx.get(g["variant_id"], 0), "memo": g["memo"], "meta": g["meta"]})
+        out.append(e)
     return {"format": "botkive-style", "version": 1, "styles": out}
 
 
-def style_import(d):
+def style_import(d, read=None):
     if not isinstance(d, dict) or d.get("format") != "botkive-style" or not isinstance(d.get("styles"), list):
         raise ValueError("봇카이브 그림체 파일이 아니에요")
     ids = []
@@ -1069,9 +1189,225 @@ def style_import(d):
             key = "g" + secrets.token_hex(4)
             db.x("INSERT INTO stypes(key, name, color, sort) VALUES (?,?,'#C7C5CC',(SELECT COALESCE(MAX(sort),0)+1 FROM stypes))", (key, name))
             hit = [{"key": key}]
-        ids.append(new_style({**{k: s[k] for k in STYLE_FIELDS if k in s}, "settings": s.get("settings"), "chars": s.get("chars") or [], "tags": s.get("tags") or [],
-                              "stype": hit[0]["key"] if hit else "etc", "images": s.get("images")}))
+        sid = new_style({**{k: s[k] for k in STYLE_FIELDS if k in s}, "settings": s.get("settings"), "chars": s.get("chars") or [], "tags": s.get("tags") or [],
+                         "stype": hit[0]["key"] if hit else "etc", "images": s.get("images")})
+        ids.append(sid)
+        vmap = {0: 0}
+        for n, v in enumerate(s.get("variants") or [], 1):
+            if isinstance(v, dict):
+                vmap[n] = new_variant(sid, {**v, "settings": v.get("settings") if isinstance(v.get("settings"), dict) else {}, "chars": v.get("chars") or []})
+                add_style_images(sid, v.get("images"), vmap[n])
+        for g in (s.get("gallery") or [])[:2000] if read else []:  # 갤러리는 압축 파일 안 파일로 (read가 바이트를 줌)
+            f = str(g.get("file") or "") if isinstance(g, dict) else ""
+            ext = f.rsplit(".", 1)[-1].lower() if "." in f else ""
+            if ext in ("png", "jpg", "jpeg", "webp", "gif") and (raw := read(f)):
+                add_sgallery(sid, None if g.get("variant") is None else vmap.get(g.get("variant")), raw, g.get("memo"), g.get("meta"), "jpg" if ext == "jpeg" else ext)
     return ids
+
+
+# ---- 페르소나: 그림 한 장 + 프롬프트 + 메모, 있으면 페르소나용 모듈(.risum) 하나 ----
+# 채팅 로그마다 페르소나를 고를 수 있고(기본은 지정 안 함), 봇에 기본 페르소나를 정해 두면 새 로그에 알아서 붙음
+# 한 사람의 여러 버전(탐험가용 김철수 · 헌터물 김철수)은 폴더(pgroups) 하나에 모음. 채팅 로그·봇은 버전(personas 줄)을 가리킴
+PERSONA_FIELDS = {"name": 100, "label": 60, "prompt": 100_000, "memo": 20_000}
+
+
+def persona_home(pid):
+    return f"personas/{pid:04d}"
+
+
+def persona_rows():
+    return db.q("""SELECT p.id, p.name, p.label, p.group_id, g.name AS group_name, p.sort, p.image, p.module_name, p.created, p.updated, p.opened,
+                     length(p.prompt) AS plen,
+                     (SELECT COUNT(*) FROM chats c WHERE c.persona_id=p.id) AS nchats,
+                     (SELECT COUNT(*) FROM bots b WHERE b.persona_id=p.id) AS nbots
+                   FROM personas p LEFT JOIN pgroups g ON g.id=p.group_id ORDER BY COALESCE(p.opened, p.updated) DESC""")
+
+
+def persona_detail(id):
+    p = db.q("SELECT p.*, g.name AS group_name FROM personas p LEFT JOIN pgroups g ON g.id=p.group_id WHERE p.id=?", (id,))
+    if not p:
+        return None
+    p = p[0]
+    p["bots"] = db.q("SELECT id, name, cover FROM bots WHERE persona_id=? ORDER BY name", (id,))
+    p["chats"] = chat_list(persona=id)
+    return p
+
+
+def pgroup_rows():
+    return db.q("""SELECT g.id, g.name, COALESCE(g.ptype, '') AS ptype, g.created, g.updated, g.opened,
+                     (SELECT COUNT(*) FROM personas p WHERE p.group_id=g.id) AS nver,
+                     (SELECT image FROM personas p WHERE p.group_id=g.id AND p.image IS NOT NULL ORDER BY p.sort, p.id LIMIT 1) AS image,
+                     (SELECT group_concat(p.name || ' ' || COALESCE(p.label, ''), ' ') FROM personas p WHERE p.group_id=g.id) AS names,
+                     (SELECT group_concat(COALESCE(p.label, ''), char(31)) FROM (SELECT label FROM personas WHERE group_id=g.id ORDER BY sort, id) p) AS labels,
+                     EXISTS(SELECT 1 FROM pfiles f WHERE f.group_id=g.id AND f.kind='module') AS has_module,
+                     (SELECT COUNT(*) FROM chats c JOIN personas p ON p.id=c.persona_id WHERE p.group_id=g.id) AS nchats,
+                     (SELECT COUNT(*) FROM bots b JOIN personas p ON p.id=b.persona_id WHERE p.group_id=g.id) AS nbots
+                   FROM pgroups g ORDER BY COALESCE(g.opened, g.updated) DESC""")
+
+
+def pgroup_detail(gid):
+    g = db.q("SELECT * FROM pgroups WHERE id=?", (gid,))
+    if not g:
+        return None
+    g = g[0]
+    g["versions"] = [persona_detail(r["id"]) for r in db.q("SELECT id FROM personas WHERE group_id=? ORDER BY sort, id", (gid,))]
+    g["images"] = pimage_rows(gid)
+    g["files"] = pfile_rows(gid)
+    return g
+
+
+def pfile_token(path):
+    """페르소나 자료를 봇 파일처럼 들여다볼 때 쓰는 토큰 (바꿔 올리면 캐시가 안 섞이게 수정 시각을 붙임)."""
+    f = DATA / path if path else None
+    return f"pm:{path}?{f.stat().st_mtime_ns}" if f and f.is_file() else None
+
+
+def pfile_rows(gid):
+    return db.q("SELECT id, persona_id, kind, name, note, size, created FROM pfiles WHERE group_id=? ORDER BY created, id", (gid,))
+
+
+def pfile_home(gid, pid):
+    """버전 자료는 personas/<버전>, 폴더 공통은 personas/g<폴더>."""
+    return persona_home(pid) if pid else f"personas/g{gid:04d}"
+
+
+def pfile_kind(kind, name):
+    if kind in KINDS:
+        return kind
+    n = (name or "").lower()
+    return "module" if n.endswith(".risum") else "preset" if n.endswith((".risup", ".risupreset")) else "lore" if n.endswith(".risulore") else "etc"
+
+
+def add_pfile(gid, pid, src, name, size, kind="", note="", created=None):
+    """받아 둔 파일(src)을 자료실 자리로 옮김."""
+    d = DATA / pfile_home(gid, pid)
+    d.mkdir(parents=True, exist_ok=True)
+    dest = d / free_name(safe_name(name, "file"), d)
+    os.replace(src, dest)
+    fid, _ = db.x("INSERT INTO pfiles(group_id, persona_id, kind, name, note, path, size, created) VALUES (?,?,?,?,?,?,?,?)",
+                  (gid, pid, pfile_kind(kind, name), name[:200], (note or "")[:2000], dest.relative_to(DATA).as_posix(), size, created or now()))
+    return fid
+
+
+def move_pfile(fid, gid, pid):
+    """버전 ↔ 폴더 공통으로 옮기면 디스크 자리도 따라감."""
+    r = db.q("SELECT path FROM pfiles WHERE id=?", (fid,))[0]
+    src, d = DATA / r["path"], DATA / pfile_home(gid, pid)
+    path = r["path"]
+    if src.is_file() and src.parent != d:
+        d.mkdir(parents=True, exist_ok=True)
+        dest = d / free_name(src.name, d)
+        os.replace(src, dest)
+        prune(src.parent)
+        path = dest.relative_to(DATA).as_posix()
+    db.x("UPDATE pfiles SET group_id=?, persona_id=?, path=? WHERE id=?", (gid, pid, path, fid))
+
+
+def drop_pfiles(where, arg):
+    for r in db.q(f"SELECT path FROM pfiles WHERE {where}", (arg,)):
+        drop_path(r["path"])
+    db.x(f"DELETE FROM pfiles WHERE {where}", (arg,))
+
+
+def pimage_rows(gid):
+    return db.q("SELECT id, persona_id, image, memo, created FROM pimages WHERE group_id=? ORDER BY id DESC", (gid,))
+
+
+def pgroup_ok(v):
+    return v if isinstance(v, int) and not isinstance(v, bool) and db.q("SELECT 1 FROM pgroups WHERE id=?", (v,)) else None
+
+
+def ptype_ok(v):
+    """페르소나 분류 키 (없는 분류면 '' = 분류 없음)."""
+    return v if isinstance(v, str) and v and db.q("SELECT 1 FROM ptypes WHERE key=?", (v,)) else ""
+
+
+def pgroup_new(name, ptype=""):
+    t = now()
+    gid, _ = db.x("INSERT INTO pgroups(name, ptype, created, updated, opened) VALUES (?,?,?,?,?)",
+                  ((name or "")[:100] or "이름 없는 페르소나", ptype_ok(ptype), t, t, t))
+    return gid
+
+
+def pgroup_next(gid):
+    """폴더 맨 뒤 자리."""
+    return db.q("SELECT COALESCE(MAX(sort), 0) + 1 AS n FROM personas WHERE group_id=?", (gid,))[0]["n"]
+
+
+def pgroup_prune(gid):
+    """버전이 하나도 안 남은 폴더는 지움."""
+    if gid and not db.q("SELECT 1 FROM personas WHERE group_id=? LIMIT 1", (gid,)):
+        imgs = [r["image"] for r in db.q("SELECT image FROM pimages WHERE group_id=?", (gid,))]
+        db.x("DELETE FROM pimages WHERE group_id=?", (gid,))
+        drop_pfiles("group_id=?", gid)
+        db.x("DELETE FROM pgroups WHERE id=?", (gid,))
+        drop_media(*imgs)
+
+
+def persona_vals(d):
+    vals = {k: str(d[k] or "").strip()[:n] for k, n in PERSONA_FIELDS.items() if k in d}
+    if "name" in vals and not vals["name"]:
+        del vals["name"]
+    return vals
+
+
+def persona_ok(v):
+    """고른 페르소나 id (없는 페르소나·None이면 None)."""
+    return v if isinstance(v, int) and not isinstance(v, bool) and db.q("SELECT 1 FROM personas WHERE id=?", (v,)) else None
+
+
+def drop_persona(pid):
+    r = db.q("SELECT image, group_id FROM personas WHERE id=?", (pid,))
+    if not r:
+        return
+    drop_pfiles("persona_id=?", pid)  # 버전 자료는 같이 지움 (봇 버전처럼)
+    db.x("UPDATE chats SET persona_id=NULL WHERE persona_id=?", (pid,))
+    db.x("UPDATE bots SET persona_id=NULL WHERE persona_id=?", (pid,))
+    db.x("UPDATE pimages SET persona_id=NULL WHERE persona_id=?", (pid,))
+    db.x("DELETE FROM personas WHERE id=?", (pid,))
+    drop_media(r[0]["image"])
+    prune(DATA / persona_home(pid))
+    pgroup_prune(r[0]["group_id"])
+
+
+def copy_persona(pid, label, gid):
+    """버전 복제: 글 · 그림 · 버전 자료까지 새 파일로. gid가 None이면 새 폴더(같은 분류, 이름 뒤에 '사본')."""
+    x = db.q("SELECT p.*, g.name AS group_name, g.ptype FROM personas p LEFT JOIN pgroups g ON g.id=p.group_id WHERE p.id=?", (pid,))[0]
+    if gid is None:
+        gid = pgroup_new(f"{x['group_name'] or x['name']} 사본", x["ptype"])
+    img = None
+    if x["image"] and re.fullmatch(MEDIA_RE, x["image"]) and (MEDIA / x["image"]).is_file():
+        img = f"{secrets.token_hex(10)}.{x['image'].rsplit('.', 1)[1]}"
+        shutil.copyfile(MEDIA / x["image"], MEDIA / img)
+    t = now()
+    nid, _ = db.x("""INSERT INTO personas(name, label, prompt, memo, image, group_id, sort, created, updated, opened) VALUES (?,?,?,?,?,?,?,?,?,?)""",
+                  (x["name"], label[:60], x["prompt"], x["memo"], img, gid, pgroup_next(gid), t, t, t))
+    for f in db.q("SELECT * FROM pfiles WHERE persona_id=? ORDER BY id", (pid,)):
+        if (DATA / f["path"]).is_file():
+            TMP.mkdir(exist_ok=True)
+            tmp = TMP / (secrets.token_hex(12) + ".part")
+            shutil.copyfile(DATA / f["path"], tmp)
+            add_pfile(gid, nid, tmp, f["name"], tmp.stat().st_size, f["kind"], f["note"])
+    return nid
+
+
+def png_persona(raw, name, prompt, note):
+    """PNG에 리스 페르소나 조각(tEXt 'persona' = base64 JSON)을 넣음 — 리스의 페르소나 불러오기로 바로 들어감. PNG가 아니면 None."""
+    if raw[:8] != b"\x89PNG\r\n\x1a\n":
+        return None
+    out, pos = [raw[:8]], 8
+    data = b"persona\0" + base64.b64encode(json.dumps({"name": name, "personaPrompt": prompt, "note": note}, ensure_ascii=False).encode())
+    while pos + 12 <= len(raw):
+        n, kind = struct.unpack(">I4s", raw[pos:pos + 8])
+        chunk = raw[pos:pos + 12 + n]
+        if kind == b"IEND":
+            out.append(struct.pack(">I", len(data)) + b"tEXt" + data + struct.pack(">I", zlib.crc32(b"tEXt" + data)))
+            out.append(chunk)
+            break
+        if not (kind == b"tEXt" and raw[pos + 8:pos + 16] == b"persona\0"):  # 예전 페르소나 조각은 빼고
+            out.append(chunk)
+        pos += 12 + n
+    return b"".join(out)
 
 
 # ---- 전부 내보내기: 봇카이브 없이도 열리는 폴더 + 다시 들이기용 봇카이브.json ----
@@ -1101,6 +1437,7 @@ EXPORT_README = """봇카이브 내보내기
     채팅 로그/             리스 형식(.json) — 리스의 채팅 불러오기나 봇카이브에 다시 넣을 수 있어요
 자료함/<종류>/<이름>/       자료함 자료 (봇과 같은 모양)
 그림체/<분류>/<이름>/       프롬프트.txt · 샘플 그림 · .botkive-style.json(봇카이브 그림체 가져오기용)
+페르소나/<이름>/            프롬프트.txt · 그림(PNG면 리스의 페르소나 불러오기로 바로 넣을 수 있어요) · 페르소나용 모듈
 봇카이브.json              위 내용을 기계가 읽는 목록 (나중에 통째로 다시 들이기용)
 
 원본 파일은 올린 그대로예요. 봇카이브가 없어도 리스에 바로 넣을 수 있어요.
@@ -1111,14 +1448,14 @@ def export_zip(out):
     """전부 내보내기를 zip으로 흘려보냄 (원본은 압축 없이 그대로 — 카드·그림은 이미 압축돼 있음)."""
     root = f"봇카이브 내보내기 {datetime.now(KST):%Y-%m-%d}"
     names = lambda t: {r["key"]: r["name"] for r in db.q(f"SELECT key, name FROM {t}")}
-    statuses, itypes, stypes = names("statuses"), names("itypes"), names("stypes")
+    statuses, itypes, stypes, ptypes = names("statuses"), names("itypes"), names("stypes"), names("ptypes")
     taken = {}  # 폴더 → 쓴 이름 (소문자)
     slot = lambda d, n: f"{d}/{free_name(safe_name(n, 'file'), taken.setdefault(d, set()))}"
     text = lambda arc, s: z.writestr(zipfile.ZipInfo(arc, time.localtime()[:6]), s, compress_type=zipfile.ZIP_DEFLATED)
     colors = {t: {r["key"]: r["color"] for r in db.q(f"SELECT key, color FROM {t}")} for t in LABELS}
     folders = {r["id"]: r for r in db.q("SELECT id, name, scope, color FROM folders ORDER BY sort, id")}
-    manifest = {"format": "botkive-export", "version": 1, "exported": now(), "statuses": statuses, "itypes": itypes, "stypes": stypes, "colors": colors,
-                "folders": [{"name": f["name"], "scope": f["scope"] or "bot", "color": f["color"]} for f in folders.values()], "bots": [], "styles": []}
+    manifest = {"format": "botkive-export", "version": 1, "exported": now(), "statuses": statuses, "itypes": itypes, "stypes": stypes, "ptypes": ptypes, "colors": colors,
+                "folders": [{"name": f["name"], "scope": f["scope"] or "bot", "color": f["color"]} for f in folders.values()], "bots": [], "styles": [], "personas": []}
     with zipfile.ZipFile(out, "w", allowZip64=True) as z:
         def media(arc, name):
             f = MEDIA / name if name and re.fullmatch(MEDIA_RE, name) else None
@@ -1142,7 +1479,7 @@ def export_zip(out):
             bdir = slot(f"{root}/{group}", b["name"] or f"봇 {b['id']}")
             taken[bdir] = {"info.txt", "채팅 로그"}
             mb = {k: b[k] for k in ("name", "creator", "status", "itype", "in_risu", "memo", "info", "created", "updated")} | {
-                "tags": tags_of(b["tags"]), "rx": json.loads(b["rx"] or "{}"), "folders": fl, "dir": bdir[len(root) + 1:], "versions": [], "loose": [], "chats": [],
+                "tags": tags_of(b["tags"]), "rx": json.loads(b["rx"] or "{}"), "persona": b["persona_id"], "folders": fl, "dir": bdir[len(root) + 1:], "versions": [], "loose": [], "chats": [],
                 "links": db.q("SELECT title, url, note FROM links WHERE bot_id=? ORDER BY sort, id", (b["id"],))}
             if b["cover"]:
                 arc = slot(bdir, "표지." + b["cover"].rsplit(".", 1)[1])
@@ -1176,14 +1513,20 @@ def export_zip(out):
                 d = slot(bdir, "버전 없이 둔 파일")
                 mb["loose_dir"] = d.rsplit("/", 1)[1]
                 mb["loose"] = [put(d, f) for f in loose]
-            for c in db.q("SELECT id, title, memo, series, ep, source FROM chats WHERE bot_id=? ORDER BY first_at, id", (b["id"],)):
+            cpos = {}
+            for c in db.q("SELECT id, title, memo, series, ep, source, persona_id AS persona FROM chats WHERE bot_id=? ORDER BY first_at, id", (b["id"],)):
+                cpos[c["id"]] = len(mb["chats"])
                 arc = slot(f"{bdir}/채팅 로그", (c["title"] or "채팅 로그") + ".json")
                 text(arc, risu_chat(c))
                 marks = db.q("SELECT idx, memo, image FROM marks WHERE chat_id=? ORDER BY idx", (c["id"],))
                 for mk in marks:
                     if mk["image"]:
                         media(f"{bdir}/채팅 로그/그림/{mk['image']}", mk["image"])
-                mb["chats"].append({k: c[k] for k in ("title", "memo", "series", "ep", "source")} | {"file": arc.rsplit("/", 1)[1], "marks": marks})
+                mb["chats"].append({k: c[k] for k in ("title", "memo", "series", "ep", "source", "persona")} | {"file": arc.rsplit("/", 1)[1], "marks": marks})
+            if bims := db.q("SELECT chat_id, idx, image, memo, created FROM bimages WHERE bot_id=? ORDER BY id", (b["id"],)):
+                for r in bims:
+                    media(f"{bdir}/갤러리/{r['image']}", r["image"])
+                mb["images"] = [{"image": r["image"], "chat": cpos.get(r["chat_id"]), "idx": r["idx"], "memo": r["memo"], "created": r["created"]} for r in bims]
             text(f"{bdir}/info.txt", info_text(b["id"], vdir, fnames))
             manifest["bots"].append(mb)
 
@@ -1202,9 +1545,56 @@ def export_zip(out):
             text(f"{sdir}/프롬프트.txt", "\n".join(lines) + "\n")
             for i, g in enumerate(s["images"], 1):
                 media(f"{sdir}/샘플 {i:02d}.{g['image'].rsplit('.', 1)[1]}", g["image"])
-            text(f"{sdir}/{safe_name(s['name'] or '그림체')}.botkive-style.json", json.dumps(style_export([s["id"]]), ensure_ascii=False))
+            def gal(g, sdir=sdir):
+                f = MEDIA / g["image"] if re.fullmatch(MEDIA_RE, g["image"] or "") else None
+                if not (f and f.is_file()):
+                    return None
+                arc = slot(f"{sdir}/갤러리", f"{len(taken.get(f'{sdir}/갤러리', ())) + 1:03d}.{g['image'].rsplit('.', 1)[1]}")
+                z.write(f, arc, compress_type=zipfile.ZIP_STORED)
+                return arc[len(sdir) + 1:]
+            text(f"{sdir}/{safe_name(s['name'] or '그림체')}.botkive-style.json", json.dumps(style_export([s["id"]], gal), ensure_ascii=False))
             linked = db.q("SELECT b.name, x.role FROM bot_styles x JOIN bots b ON b.id=x.bot_id WHERE x.style_id=?", (s["id"],))
             manifest["styles"].append({"name": s["name"], "dir": sdir[len(root) + 1:], "folders": [folders[i]["name"] for i in s["folders"] if i in folders], "bots": linked})
+
+        manifest["pgroups"] = [{k: g[k] for k in ("id", "name", "ptype", "created")} for g in db.q("SELECT * FROM pgroups ORDER BY id")]
+        gtype = {g["id"]: g["ptype"] for g in manifest["pgroups"]}
+        gdirs, nver = {}, {r["group_id"]: r["n"] for r in db.q("SELECT group_id, COUNT(*) AS n FROM personas GROUP BY group_id")}
+        for x in db.q("SELECT p.*, g.name AS group_name FROM personas p LEFT JOIN pgroups g ON g.id=p.group_id ORDER BY p.group_id, p.sort, p.id"):
+            if x["group_id"] not in gdirs:
+                pt = ptypes.get(gtype.get(x["group_id"]) or "")  # 분류가 있으면 페르소나/<분류>/<폴더>
+                gdirs[x["group_id"]] = slot(f"{root}/페르소나/{safe_name(pt)}" if pt else f"{root}/페르소나", x["group_name"] or x["name"] or "페르소나")
+            pdir = slot(gdirs[x["group_id"]], x["label"] or x["name"] or "버전") if nver.get(x["group_id"], 0) > 1 else gdirs[x["group_id"]]  # 버전이 여럿이면 버전마다 폴더
+            mp = {k: x[k] for k in ("id", "name", "label", "sort", "prompt", "memo", "created")} | {"group": x["group_id"], "dir": pdir[len(root) + 1:]}
+            img = MEDIA / x["image"] if x["image"] and re.fullmatch(MEDIA_RE, x["image"]) else None
+            if img and img.is_file():
+                raw = img.read_bytes()
+                risu = png_persona(raw, x["name"], x["prompt"] or "", x["memo"] or "")  # PNG면 리스 페르소나 불러오기로 바로 들어가는 그림
+                arc = slot(pdir, f"{x['name'] or '페르소나'}.png" if risu else "그림." + x["image"].rsplit(".", 1)[1])
+                z.writestr(zipfile.ZipInfo(arc, time.localtime()[:6]), risu or raw, compress_type=zipfile.ZIP_STORED)
+                mp["image"] = arc.rsplit("/", 1)[1]
+            lines = [f"이름: {x['name']}"] + ([f"버전: {x['label']}"] if x["label"] else []) + ["", "프롬프트", x["prompt"] or ""] + (["", "메모", x["memo"].strip()] if (x["memo"] or "").strip() else [])
+            text(slot(pdir, "프롬프트.txt"), "\n".join(lines) + "\n")
+            mp["files"] = []
+            for f in db.q("SELECT * FROM pfiles WHERE persona_id=? ORDER BY id", (x["id"],)):
+                if (DATA / f["path"]).is_file():
+                    arc = slot(pdir, f["name"] or "file")
+                    z.write(DATA / f["path"], arc, compress_type=zipfile.ZIP_STORED)
+                    mp["files"].append({"file": arc[len(pdir) + 1:], "name": f["name"], "kind": f["kind"], "note": f["note"] or "", "created": f["created"]})
+            manifest["personas"].append(mp)
+        for g in manifest["pgroups"]:  # 갤러리: 폴더 아래 '갤러리' (버전 전용이면 그 버전 id)
+            g["images"] = []
+            for r in db.q("SELECT persona_id, image, memo, created FROM pimages WHERE group_id=? ORDER BY id", (g["id"],)):
+                f = MEDIA / r["image"] if re.fullmatch(MEDIA_RE, r["image"] or "") else None
+                if g["id"] in gdirs and f and f.is_file():
+                    arc = slot(f"{gdirs[g['id']]}/갤러리", f"{len(g['images']) + 1:03d}.{r['image'].rsplit('.', 1)[1]}")
+                    z.write(f, arc, compress_type=zipfile.ZIP_STORED)
+                    g["images"].append({"file": arc[len(root) + 1:], "persona": r["persona_id"], "memo": r["memo"] or "", "created": r["created"]})
+            g["files"] = []  # 폴더 공통 자료
+            for f in db.q("SELECT * FROM pfiles WHERE group_id=? AND persona_id IS NULL ORDER BY id", (g["id"],)):
+                if g["id"] in gdirs and (DATA / f["path"]).is_file():
+                    arc = slot(f"{gdirs[g['id']]}/공통 자료", f["name"] or "file")
+                    z.write(DATA / f["path"], arc, compress_type=zipfile.ZIP_STORED)
+                    g["files"].append({"file": arc[len(root) + 1:], "name": f["name"], "kind": f["kind"], "note": f["note"] or "", "created": f["created"]})
         text(f"{root}/읽어 주세요.txt", EXPORT_README)
         text(f"{root}/봇카이브.json", json.dumps(manifest, ensure_ascii=False, indent=1))
 
@@ -1225,11 +1615,15 @@ def import_zip(path, job):
         z = zipfile.ZipFile(path)
     except (zipfile.BadZipFile, OSError):
         raise ValueError("압축 파일이 아니거나 덜 받아진 파일이에요")
-    made = {"bots": [], "styles": [], "media": []}
+    made = {"bots": [], "styles": [], "personas": [], "pgroups": [], "media": []}
     try:
         with z:
             return _import_zip(z, job, made)
     except Exception:
+        for pid in made["personas"]:
+            drop_persona(pid)
+        for gid in made["pgroups"]:
+            pgroup_prune(gid)
         for bid in made["bots"]:
             for f in db.q("SELECT file, path FROM files WHERE bot_id=?", (bid,)):
                 drop_file(f)
@@ -1265,7 +1659,8 @@ def _import_zip(z, job, made):
     lst = lambda v: v if isinstance(v, list) else []
     txt = lambda v, n: str(v or "").strip()[:n]
     when = lambda v: v if isinstance(v, str) and re.fullmatch(r"\d{4}-\d\d-\d\dT[\d:+.\-]+", v) else now()
-    out = {"bots": 0, "items": 0, "styles": 0, "chats": 0, "files": 0, "missing": 0, "skipped": [], "skipped_styles": [], "failed_styles": []}
+    out = {"bots": 0, "items": 0, "styles": 0, "personas": 0, "chats": 0, "files": 0, "missing": 0,
+           "skipped": [], "skipped_styles": [], "skipped_personas": [], "failed_styles": []}
 
     def take(info, dest):
         part = dest.with_name(dest.name + ".part")
@@ -1345,6 +1740,70 @@ def _import_zip(z, job, made):
         for n, _ in DEFAULT_FOLDERS:
             if ("bot", n) not in fids:
                 db.x("DELETE FROM folders WHERE name=? AND COALESCE(scope, 'bot')='bot' AND id NOT IN (SELECT folder_id FROM bot_folders)", (n,))
+    job["msg"] = "페르소나를 들이는 중"
+    pmap = {}  # 내보낸 서재의 페르소나 id → 여기 id
+    key = lambda name, label, prompt: (name, label or "", prompt or "")
+    same = {key(r["name"], r["label"], r["prompt"]): r["id"] for r in db.q("SELECT id, name, label, prompt FROM personas")}
+    gname = {g.get("id"): txt(g.get("name"), 100) for g in lst(m.get("pgroups")) if isinstance(g, dict)}
+    gtype = {g.get("id"): g.get("ptype") for g in lst(m.get("pgroups")) if isinstance(g, dict)}
+    gmap, gown = {}, {txt(r["name"], 100): r["id"] for r in db.q("SELECT id, name FROM pgroups ORDER BY id")}  # 이름이 같은 폴더가 있으면 그 폴더에 넣음
+    for mp in lst(m.get("personas")):
+        if not isinstance(mp, dict):
+            continue
+        vals = persona_vals(mp)
+        vals.setdefault("name", "이름 없는 페르소나")
+        k = key(vals["name"], vals.get("label"), vals.get("prompt"))
+        if k in same:  # 이름·버전·프롬프트가 같으면 있는 것을 씀
+            pmap[mp.get("id")] = same[k]
+            out["skipped_personas"].append(vals["name"] + (f" ({vals['label']})" if vals.get("label") else ""))
+            continue
+        g = mp.get("group") if isinstance(mp.get("group"), int) else None
+        gk = g if g is not None else ("old", mp.get("id"))  # 예전 내보내기(폴더 없음)는 이름이 폴더
+        if gk not in gmap:
+            gn = (gname.get(g) if g is not None else None) or vals["name"]
+            if gn not in gown:
+                gown[gn] = pgroup_new(gn, label("ptypes", gtype.get(g), "") if g is not None else "")
+                made["pgroups"].append(gown[gn])
+            gmap[gk] = gown[gn]
+        gid = gmap[gk]
+        pd = txt(mp.get("dir"), 2000)
+        vals |= {"image": media(f"{pd}/{mp['image']}") if mp.get("image") else None, "created": when(mp.get("created")), "updated": now(),
+                 "group_id": gid, "sort": pgroup_next(gid)}
+        pid, _ = db.x(f"INSERT INTO personas({', '.join(vals)}) VALUES ({','.join('?' * len(vals))})", tuple(vals.values()))
+        made["personas"].append(pid)
+        same[k] = pid
+        fl = [f for f in lst(mp.get("files")) if isinstance(f, dict)]
+        if mp.get("module"):  # 예전 내보내기: 버전마다 모듈 하나
+            fl.append({"file": mp["module"], "name": mp.get("module_name"), "kind": "module"})
+        for f in fl:
+            if info := ent(f"{pd}/{txt(f.get('file'), 2000)}"):
+                TMP.mkdir(exist_ok=True)
+                tmp = TMP / secrets.token_hex(12)
+                take(info, tmp)
+                nm = re.sub(r'[\x00-\x1f/\\]', "_", txt(f.get("name"), 200) or str(f.get("file")).rsplit("/", 1)[-1])[:200]
+                add_pfile(gid, pid, tmp, nm, info.file_size, txt(f.get("kind"), 20), txt(f.get("note"), 2000), when(f.get("created")))
+        if isinstance(mp.get("id"), int):
+            pmap[mp["id"]] = pid
+        out["personas"] += 1
+    persona_of = lambda v: pmap.get(v) if isinstance(v, int) else None
+    for g in lst(m.get("pgroups")):
+        gid = gmap.get(g.get("id")) if isinstance(g, dict) else None
+        if gid not in made["pgroups"]:
+            continue
+        for im in lst(g.get("images")):
+            if isinstance(im, dict) and (name := media(txt(im.get("file"), 2000))):
+                pid = persona_of(im.get("persona"))
+                db.x("INSERT INTO pimages(group_id, persona_id, image, memo, created) VALUES (?,?,?,?,?)",
+                     (gid, pid if pid and db.q("SELECT 1 FROM personas WHERE id=? AND group_id=?", (pid, gid)) else None,
+                      name, txt(im.get("memo"), 2000), when(im.get("created"))))
+        for f in lst(g.get("files")):
+            if isinstance(f, dict) and (info := ent(txt(f.get("file"), 2000))):
+                TMP.mkdir(exist_ok=True)
+                tmp = TMP / secrets.token_hex(12)
+                take(info, tmp)
+                nm = re.sub(r'[\x00-\x1f/\\]', "_", txt(f.get("name"), 200) or info.filename.rsplit("/", 1)[-1])[:200]
+                add_pfile(gid, None, tmp, nm, info.file_size, txt(f.get("kind"), 20), txt(f.get("note"), 2000), when(f.get("created")))
+
     have = {(r["name"], r["creator"] or "", bool(r["itype"])) for r in db.q("SELECT name, creator, itype FROM bots")}
     new_bots = {}  # 이름 → 새 id (그림체 잇기용)
 
@@ -1374,7 +1833,7 @@ def _import_zip(z, job, made):
             continue
         job["msg"] = f"봇을 들이는 중 — {vals['name']}"
         bdir = txt(mb.get("dir"), 2000)
-        vals |= {"status": label("statuses", mb.get("status"), "later"), "itype": label("itypes", item, "etc") if item else "",
+        vals |= {"status": label("statuses", mb.get("status"), "later"), "itype": label("itypes", item, "etc") if item else "", "persona_id": persona_of(mb.get("persona")),
                  "tags": json.dumps(clean_tags(mb.get("tags")), ensure_ascii=False), "created": when(mb.get("created")), "updated": when(mb.get("updated")),
                  "rx": json.dumps({k: v for k, v in (mb.get("rx") if isinstance(mb.get("rx"), dict) else {}).items()
                                    if re.fullmatch(r"[0-9a-f]{12}", str(k)) and v in RX_MODES})}
@@ -1412,7 +1871,8 @@ def _import_zip(z, job, made):
             db.x("UPDATE versions SET current=1 WHERE id=?", (cur,))
         for mf in lst(mb.get("loose")):
             add_file(bid, None, f"{bdir}/{txt(mb.get('loose_dir'), 200) or '버전 없이 둔 파일'}", mf)
-        for mc in lst(mb.get("chats")):
+        cmap = {}  # 내보낸 채팅 순서 → 새 id (그림 잇기)
+        for ci, mc in enumerate(lst(mb.get("chats"))):
             info = ent(f"{bdir}/채팅 로그/{mc.get('file')}") if isinstance(mc, dict) else None
             if not info or info.file_size > 300_000_000:
                 continue
@@ -1426,16 +1886,23 @@ def _import_zip(z, job, made):
                 continue
             ats = [x[4] for x in msgs if x[4]]
             ep = mc.get("ep")
-            cid, _ = db.x("""INSERT INTO chats(bot_id, title, memo, source, series, ep, count, first_at, last_at, created, updated)
-                             VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+            cid, _ = db.x("""INSERT INTO chats(bot_id, title, memo, source, series, ep, count, first_at, last_at, created, updated, persona_id)
+                             VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
                           (bid, txt(mc.get("title"), 200) or "채팅 로그", str(mc.get("memo") or "")[:20000], txt(mc.get("source"), 200),
-                           txt(mc.get("series"), 100), ep if isinstance(ep, int) else None, len(msgs), min(ats) if ats else None, max(ats) if ats else None, now(), now()))
+                           txt(mc.get("series"), 100), ep if isinstance(ep, int) else None, len(msgs), min(ats) if ats else None, max(ats) if ats else None, now(), now(),
+                           persona_of(mc.get("persona"))))
             db.many("INSERT INTO messages(chat_id, idx, role, name, text, at) VALUES (?,?,?,?,?,?)", [(cid, *x) for x in msgs])
+            cmap[ci] = cid
             db.many("INSERT OR IGNORE INTO marks(chat_id, idx, memo, image, created) VALUES (?,?,?,?,?)",
                     [(cid, k["idx"], str(k.get("memo") or "")[:4000],
                       media(f"{bdir}/채팅 로그/그림/{k['image']}", k["image"]) if re.fullmatch(MEDIA_RE, str(k.get("image") or "")) else None, now())
                      for k in lst(mc.get("marks")) if isinstance(k, dict) and isinstance(k.get("idx"), int) and 0 <= k["idx"] < len(msgs)])
             out["chats"] += 1
+        for r in lst(mb.get("images")):
+            if isinstance(r, dict) and re.fullmatch(MEDIA_RE, str(r.get("image") or "")) and (img := media(f"{bdir}/갤러리/{r['image']}", r["image"])):
+                cid, idx = bimage_link(bid, cmap.get(r.get("chat")) if isinstance(r.get("chat"), int) else None, r.get("idx"))
+                db.x("INSERT INTO bimages(bot_id, chat_id, idx, image, memo, created) VALUES (?,?,?,?,?,?)",
+                     (bid, cid, idx, img, txt(r.get("memo"), 2000), when(r.get("created"))))
         write_info(bid)
         out["items" if item else "bots"] += 1
 
@@ -1452,7 +1919,10 @@ def _import_zip(z, job, made):
             out["skipped_styles"].append(txt(ms.get("name"), 200))
             continue
         try:
-            ids = style_import(json.loads(z.read(js[0])))
+            def read(f, sd=sd):
+                n = sd + f
+                return z.read(n) if f and ".." not in f and n in ents else None
+            ids = style_import(json.loads(z.read(js[0])), read)
         except ValueError:  # 그림체 파일 하나가 깨졌으면 그것만 빼고
             out["failed_styles"].append(txt(ms.get("name"), 200))
             continue
@@ -1476,7 +1946,7 @@ def run_import(tok):
         job["result"] = import_zip(import_part(tok), job)
         job.update(state="done", msg="끝")
         r = job["result"]
-        print(f"들이기 끝: 봇 {r['bots']} · 자료 {r['items']} · 그림체 {r['styles']} · 채팅 {r['chats']} · 원본 {r['files']} (건너뜀 {len(r['skipped'])})", flush=True)
+        print(f"들이기 끝: 봇 {r['bots']} · 자료 {r['items']} · 그림체 {r['styles']} · 페르소나 {r['personas']} · 채팅 {r['chats']} · 원본 {r['files']} (건너뜀 {len(r['skipped'])})", flush=True)
     except ValueError as e:
         job.update(state="error", msg=str(e))
     except zipfile.BadZipFile as e:  # 받다 망가진 압축 파일 (속 파일 CRC가 안 맞음 등)
@@ -1501,7 +1971,7 @@ def clean_tags(v):
 
 
 def bot_summaries(folder=None, items=False):
-    sql = """SELECT b.id, b.name, b.creator, b.status, b.itype, b.in_risu, b.cover, b.updated, b.opened, b.created, b.tags,
+    sql = """SELECT b.id, b.name, b.creator, b.status, b.itype, b.in_risu, b.cover, b.updated, b.opened, b.created, b.tags, b.persona_id,
                (SELECT COUNT(*) FROM chats c WHERE c.bot_id=b.id) AS chats,
                (SELECT COUNT(*) FROM files f WHERE f.bot_id=b.id) AS files,
                (SELECT MAX(COALESCE(c.updated, c.created)) FROM chats c WHERE c.bot_id=b.id) AS chat_at,
@@ -1534,14 +2004,31 @@ def bot_detail(id):
     for v in b["versions"]:
         v["intros"] = [i for i in ins if i["version_id"] == v["id"]]
     b["chats"] = chat_list(id)
+    b["images"] = bimage_rows(id)
+    b["scene_pics"] = db.q("""SELECT m.chat_id, m.idx, m.image, m.memo, m.created FROM marks m JOIN chats c ON c.id=m.chat_id
+                             WHERE c.bot_id=? AND m.image IS NOT NULL ORDER BY m.created DESC""", (id,))
     b["tags"] = tags_of(b.get("tags"))
-    b["styles"] = db.q("""SELECT s.id, s.name, s.stype, bs.role, (SELECT image FROM style_images i WHERE i.style_id=s.id ORDER BY sort, id LIMIT 1) AS cover
+    b["styles"] = db.q("""SELECT s.id, s.name, s.stype, bs.role, (SELECT image FROM style_images i WHERE i.style_id=s.id ORDER BY i.variant_id IS NOT NULL, sort, id LIMIT 1) AS cover
                           FROM bot_styles bs JOIN styles s ON s.id=bs.style_id WHERE bs.bot_id=? ORDER BY bs.role='official' DESC, s.name""", (id,))
     try:
         b["rx"] = json.loads(b.get("rx") or "{}")
     except ValueError:
         b["rx"] = {}
+    p = db.q("SELECT id, name, label, group_id, image FROM personas WHERE id=?", (b["persona_id"],)) if b.get("persona_id") else []
+    b["persona"] = p[0] if p else None
     return b
+
+
+def bimage_rows(bid):
+    return db.q("SELECT id, chat_id, idx, image, memo, created FROM bimages WHERE bot_id=? ORDER BY id DESC", (bid,))
+
+
+def bimage_link(bid, chat_id, idx):
+    """그림을 이을 채팅·메시지 (그 봇 채팅이 아니거나 메시지 번호가 없으면 빼고)."""
+    c = db.q("SELECT count FROM chats WHERE id=? AND bot_id=?", (chat_id, bid)) if isinstance(chat_id, int) else []
+    if not c:
+        return None, None
+    return chat_id, idx if isinstance(idx, int) and not isinstance(idx, bool) and 0 <= idx < (c[0]["count"] or 0) else None
 
 
 # ---- 버전 (카드·모듈·소개글을 업데이트마다 묶음) ----
@@ -1921,12 +2408,14 @@ def current_version(bot_id, create=True):
     return new_version(bot_id, info=info[0]["info"] if info else {})
 
 
-def chat_list(bot_id=None):
+def chat_list(bot_id=None, persona=None):
     sql = """SELECT c.id, c.bot_id, c.title, c.memo, c.source, c.count, c.first_at, c.last_at, c.created, c.updated, COALESCE(c.series, '') AS series, c.ep,
-               b.name AS bot_name, b.cover AS bot_cover,
+               b.name AS bot_name, b.cover AS bot_cover, b.persona_id AS bot_persona, c.persona_id, p.name AS persona_name, p.label AS persona_label, p.group_id AS persona_group, p.image AS persona_image,
                (SELECT COUNT(*) FROM marks m WHERE m.chat_id=c.id) AS marks,
                (SELECT COUNT(*) FROM marks m WHERE m.chat_id=c.id AND m.image IS NOT NULL) AS pics
-             FROM chats c JOIN bots b ON b.id=c.bot_id"""
+             FROM chats c JOIN bots b ON b.id=c.bot_id LEFT JOIN personas p ON p.id=c.persona_id"""
+    if persona:
+        return db.q(sql + " WHERE c.persona_id=? ORDER BY COALESCE(c.last_at, 0) DESC, c.id DESC", (persona,))
     if bot_id:
         return db.q(sql + " WHERE c.bot_id=? ORDER BY COALESCE(c.last_at, 0) DESC, c.id DESC", (bot_id,))
     return db.q(sql + " ORDER BY COALESCE(c.updated, c.created) DESC")
@@ -1950,7 +2439,9 @@ def state():
                           FROM itypes t ORDER BY sort, key"""),
         "items": db.q("SELECT COUNT(*) AS n FROM bots WHERE COALESCE(itype, '') != ''")[0]["n"],
         "stypes": db.q("""SELECT t.*, (SELECT COUNT(*) FROM styles s WHERE s.stype=t.key) AS count FROM stypes t ORDER BY sort, key"""),
+        "ptypes": db.q("""SELECT t.*, (SELECT COUNT(*) FROM pgroups g WHERE g.ptype=t.key) AS count FROM ptypes t ORDER BY sort, key"""),
         "styles": db.q("SELECT COUNT(*) AS n FROM styles")[0]["n"],
+        "personas": db.q("SELECT COUNT(*) AS n FROM pgroups")[0]["n"],
         "shelves": db.q("""SELECT s.*, (SELECT COUNT(*) FROM files f WHERE f.shelf_id=s.id AND f.bot_id IS NULL) AS count
                            FROM shelves s ORDER BY sort, id"""),
         "bots": db.q("SELECT COUNT(*) AS n FROM bots WHERE COALESCE(itype, '') = ''")[0]["n"],
@@ -2302,6 +2793,43 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send(200, rows)
             if p == ["styles"]:
                 return self.send(200, style_rows())
+            if p == ["personas"]:
+                return self.send(200, persona_rows())
+            if p == ["pgroups"]:
+                return self.send(200, pgroup_rows())
+            if len(p) == 2 and p[0] == "pgroups" and p[1].isdigit():
+                g = pgroup_detail(int(p[1]))
+                if not g:
+                    return self.send(404, {"error": "페르소나가 없어요"})
+                if params.get("open"):
+                    db.x("UPDATE pgroups SET opened=? WHERE id=?", (now(), g["id"]))
+                return self.send(200, g)
+            if 2 <= len(p) <= 4 and p[0] == "pfiles" and p[1].isdigit():  # 페르소나 자료: 내려받기 · 로어북 · 에셋
+                f = db.q("SELECT name, path FROM pfiles WHERE id=?", (int(p[1]),))
+                tok = pfile_token(f[0]["path"]) if f else None
+                if not tok:
+                    return self.send(404, {"error": "파일이 없어요"})
+                if len(p) == 2:
+                    return self.send_file(DATA / f[0]["path"], "application/octet-stream", f[0]["name"] or "file")
+                try:
+                    if p[2] == "lore" and len(p) == 3:
+                        return self.send(200, file_lore(tok))
+                    if p[2] == "assets" and len(p) == 3:
+                        return self.send(200, file_assets(tok))
+                    if p[2] == "masset" and len(p) == 4 and p[3].isdigit():
+                        return self.send_mod_asset(tok, int(p[3]))
+                    if p[2] == "asset" and len(p) == 4 and p[3].isdigit():
+                        return self.send_card_asset(tok, int(p[3]))
+                except (ValueError, json.JSONDecodeError, OSError, zipfile.BadZipFile) as e:
+                    return self.send(422, {"error": str(e) or "파일을 읽지 못했어요"})
+                return self.send(404, {"error": "없음"})
+            if len(p) == 2 and p[0] == "personas" and p[1].isdigit():
+                x = persona_detail(int(p[1]))
+                if not x:
+                    return self.send(404, {"error": "페르소나가 없어요"})
+                if params.get("open"):
+                    db.x("UPDATE personas SET opened=? WHERE id=?", (now(), x["id"]))
+                return self.send(200, x)
             if p == ["export"]:
                 return self.send_export()
             if p and len(p) == 2 and p[0] == "import":
@@ -2375,6 +2903,42 @@ class Handler(BaseHTTPRequestHandler):
                 return
             if p == ["styles"]:
                 return self.send(200, style_detail(new_style(d)))
+            if len(p) == 3 and p[0] == "bots" and p[1].isdigit() and p[2] == "images":  # {image(data URL), chat_id, idx, memo}
+                bid = int(p[1])
+                if not db.q("SELECT 1 FROM bots WHERE id=?", (bid,)):
+                    return self.send(404, {"error": "봇이 없어요"})
+                cid, idx = bimage_link(bid, d.get("chat_id"), d.get("idx"))
+                img = save_data_url(d.get("image"))
+                iid, _ = db.x("INSERT INTO bimages(bot_id, chat_id, idx, image, memo, created) VALUES (?,?,?,?,?,?)",
+                              (bid, cid, idx, img, str(d.get("memo") or "").strip()[:2000], now()))
+                return self.send(200, {"ok": True, "id": iid, "images": bimage_rows(bid)})
+            if len(p) == 3 and p[0] == "pgroups" and p[1].isdigit() and p[2] == "images":  # {image(data URL), persona_id(null = 폴더 공통), memo}
+                gid = int(p[1])
+                if not db.q("SELECT 1 FROM pgroups WHERE id=?", (gid,)):
+                    return self.send(404, {"error": "페르소나가 없어요"})
+                pid = d.get("persona_id")
+                pid = pid if isinstance(pid, int) and db.q("SELECT 1 FROM personas WHERE id=? AND group_id=?", (pid, gid)) else None
+                img = save_data_url(d.get("image"))
+                iid, _ = db.x("INSERT INTO pimages(group_id, persona_id, image, memo, created) VALUES (?,?,?,?,?)",
+                              (gid, pid, img, str(d.get("memo") or "").strip()[:2000], now()))
+                return self.send(200, {"ok": True, "id": iid, "images": pimage_rows(gid)})
+            if len(p) == 3 and p[0] == "personas" and p[1].isdigit() and p[2] == "copy":  # {label, group_id: 없으면 같은 폴더, null이면 새 폴더}
+                old = db.q("SELECT label, group_id FROM personas WHERE id=?", (int(p[1]),))
+                if not old:
+                    return self.send(404, {"error": "페르소나가 없어요"})
+                gid = (pgroup_ok(d["group_id"]) if d["group_id"] is not None else None) if "group_id" in d else old[0]["group_id"]
+                label = str(d.get("label") if d.get("label") is not None else f"{old[0]['label'] or '기본'} 사본").strip()
+                return self.send(200, persona_detail(copy_persona(int(p[1]), label, gid)))
+            if p == ["personas"]:
+                vals = persona_vals(d)
+                vals.setdefault("name", "이름 없는 페르소나")
+                if d.get("image"):
+                    vals["image"] = save_data_url(d["image"])
+                vals["group_id"] = pgroup_ok(d.get("group_id")) or pgroup_new(vals["name"], d.get("ptype"))  # 폴더를 안 고르면 이름으로 새 폴더
+                vals["sort"] = pgroup_next(vals["group_id"])
+                vals["created"] = vals["updated"] = vals["opened"] = now()
+                pid, _ = db.x(f"INSERT INTO personas({', '.join(vals)}) VALUES ({','.join('?' * len(vals))})", tuple(vals.values()))
+                return self.send(200, persona_detail(pid))
             if p == ["import"]:
                 return self.import_start(d)
             if p and len(p) == 3 and p[0] == "import" and p[2] == "run":
@@ -2382,12 +2946,24 @@ class Handler(BaseHTTPRequestHandler):
             if p == ["styles", "import"]:
                 ids = style_import(d)
                 return self.send(200, {"ok": True, "ids": ids})
+            if p and len(p) == 3 and p[0] == "styles" and p[1].isdigit() and p[2] in ("variants", "gallery"):
+                sid = int(p[1])
+                if not db.q("SELECT 1 FROM styles WHERE id=?", (sid,)):
+                    return self.send(404, {"error": "그림체가 없어요"})
+                if p[2] == "variants":  # {label, prompt, negative, chars, settings, memo}
+                    vid = new_variant(sid, d)
+                    return self.send(200, {"ok": True, "id": vid, "style": style_detail(sid)})
+                vid = d.get("variant_id")  # 갤러리 {image, variant_id(null = 공통, 0 = 기본), memo, meta}
+                vid = None if vid is None else (0 if vid == 0 else style_variant_ok(sid, vid) or None)
+                add_sgallery(sid, vid, d.get("image"), d.get("memo"), d.get("meta"))
+                return self.send(200, {"ok": True, "gallery": sgallery_rows(sid)})
             if p and len(p) == 3 and p[0] == "styles" and p[1].isdigit() and p[2] in ("images", "bots"):
                 sid = int(p[1])
                 if not db.q("SELECT 1 FROM styles WHERE id=?", (sid,)):
                     return self.send(404, {"error": "그림체가 없어요"})
                 if p[2] == "images":
-                    add_style_images(sid, d.get("images"))
+                    vid = style_variant_ok(sid, d.get("variant_id"))
+                    add_style_images(sid, d.get("images"), vid or None)
                 else:
                     bid = d.get("bot_id")
                     if not isinstance(bid, int) or not db.q("SELECT 1 FROM bots WHERE id=?", (bid,)):
@@ -2522,10 +3098,12 @@ class Handler(BaseHTTPRequestHandler):
                 if not msgs:
                     return self.send(400, {"error": "메시지를 하나도 못 읽었어요"})
                 ats = [m[4] for m in msgs if m[4]]
-                cid, _ = db.x("""INSERT INTO chats(bot_id, title, memo, source, count, first_at, last_at, created, updated)
-                                 VALUES (?,?,?,?,?,?,?,?,?)""",
+                # 페르소나: 고른 것(null = 지정 안 함), 안 보냈으면 봇의 기본 페르소나
+                pid = persona_ok(d["persona_id"]) if "persona_id" in d else db.q("SELECT persona_id FROM bots WHERE id=?", (bid,))[0]["persona_id"]
+                cid, _ = db.x("""INSERT INTO chats(bot_id, title, memo, source, count, first_at, last_at, created, updated, persona_id)
+                                 VALUES (?,?,?,?,?,?,?,?,?,?)""",
                               (bid, str(d.get("title") or "").strip()[:200] or "채팅 로그", str(d.get("memo") or "")[:20000],
-                               str(d.get("source") or "")[:200], len(msgs), min(ats) if ats else None, max(ats) if ats else None, now(), now()))
+                               str(d.get("source") or "")[:200], len(msgs), min(ats) if ats else None, max(ats) if ats else None, now(), now(), pid))
                 db.many("INSERT INTO messages(chat_id, idx, role, name, text, at) VALUES (?,?,?,?,?,?)", [(cid, *m) for m in msgs])
                 db.x("UPDATE bots SET updated=? WHERE id=?", (now(), bid))
                 return self.send(200, {"ok": True, "id": cid})
@@ -2541,8 +3119,8 @@ class Handler(BaseHTTPRequestHandler):
             like = f"%/m/{n}%"
             used = db.q("""SELECT 1 FROM bots WHERE intro_html LIKE ? OR basic LIKE ? OR cover=?
                            UNION SELECT 1 FROM versions WHERE intro_html LIKE ? OR basic LIKE ?
-                           UNION SELECT 1 FROM intros WHERE html LIKE ? UNION SELECT 1 FROM marks WHERE image=? LIMIT 1""",
-                        (like, like, n, like, like, like, n))
+                           UNION SELECT 1 FROM intros WHERE html LIKE ? UNION SELECT 1 FROM marks WHERE image=? UNION SELECT 1 FROM bimages WHERE image=? LIMIT 1""",
+                        (like, like, n, like, like, like, n, n))
             if not used:
                 drop_media(n)
 
@@ -2558,6 +3136,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self.put_upload(params)
             if p and len(p) == 2 and p[0] == "import":
                 return self.put_import(p[1], params)
+            if p and len(p) == 3 and p[0] == "pgroups" and p[1].isdigit() and p[2] == "files":
+                return self.put_pfile(int(p[1]), params)
             d = self.body()
             if p == ["auth"]:
                 return self.auth_put(d)
@@ -2578,6 +3158,11 @@ class Handler(BaseHTTPRequestHandler):
                     self.gc_intro(f"/m/{b[0]['cover']}")
                 if isinstance(d.get("folders"), list):
                     set_folders(bid, d["folders"])
+                if "persona_id" in d:  # 기본 페르소나 (null = 없음), fill_chats면 지정 안 한 로그에도 붙임
+                    pid = persona_ok(d["persona_id"])
+                    db.x("UPDATE bots SET persona_id=? WHERE id=?", (pid, bid))
+                    if pid and d.get("fill_chats"):
+                        db.x("UPDATE chats SET persona_id=? WHERE bot_id=? AND persona_id IS NULL", (pid, bid))
                 if "itype" in vals:
                     place_bot(bid)
                 else:
@@ -2624,6 +3209,106 @@ class Handler(BaseHTTPRequestHandler):
                 if isinstance(d.get("folders"), list):
                     set_style_folders(sid, d["folders"])
                 return self.send(200, style_detail(sid))
+            if p and len(p) == 2 and p[0] == "personas" and p[1].isdigit():
+                pid = int(p[1])
+                old = db.q("SELECT image, name, group_id FROM personas WHERE id=?", (pid,))
+                if not old:
+                    return self.send(404, {"error": "페르소나가 없어요"})
+                vals = persona_vals(d)
+                if d.get("image"):
+                    vals["image"] = save_data_url(d["image"])
+                elif d.get("drop_image"):
+                    vals["image"] = None
+                if "group_id" in d:  # 다른 폴더로 옮기기 (null = 이 버전만 새 폴더로)
+                    gid = pgroup_ok(d["group_id"]) or pgroup_new(vals.get("name") or old[0]["name"], db.q("SELECT ptype FROM pgroups WHERE id=?", (old[0]["group_id"],))[0]["ptype"])
+                    if gid != old[0]["group_id"]:
+                        vals |= {"group_id": gid, "sort": pgroup_next(gid)}
+                if vals:
+                    vals["updated"] = now()
+                    db.x(f"UPDATE personas SET {', '.join(k + '=?' for k in vals)} WHERE id=?", (*vals.values(), pid))
+                if "image" in vals:
+                    drop_media(old[0]["image"])
+                if "group_id" in vals:
+                    db.x("UPDATE pimages SET group_id=? WHERE persona_id=?", (vals["group_id"], pid))
+                    db.x("UPDATE pfiles SET group_id=? WHERE persona_id=?", (vals["group_id"], pid))
+                    pgroup_prune(old[0]["group_id"])
+                return self.send(200, persona_detail(pid))
+            if p and len(p) == 2 and p[0] == "pfiles" and p[1].isdigit():  # {name, kind, note, persona_id(null = 폴더 공통)}
+                fid = int(p[1])
+                r = db.q("SELECT group_id, persona_id, name FROM pfiles WHERE id=?", (fid,))
+                if not r:
+                    return self.send(404, {"error": "파일이 없어요"})
+                gid = r[0]["group_id"]
+                vals = {}
+                if "name" in d:
+                    vals["name"] = re.sub(r'[\x00-\x1f/\\]', "_", str(d["name"] or "")).strip()[:200] or r[0]["name"]
+                if "kind" in d:
+                    vals["kind"] = pfile_kind(d["kind"], vals.get("name", r[0]["name"]))
+                if "note" in d:
+                    vals["note"] = str(d["note"] or "")[:2000]
+                if vals:
+                    db.x(f"UPDATE pfiles SET {', '.join(k + '=?' for k in vals)} WHERE id=?", (*vals.values(), fid))
+                if "persona_id" in d:
+                    pid = d["persona_id"] if isinstance(d["persona_id"], int) and db.q("SELECT 1 FROM personas WHERE id=? AND group_id=?", (d["persona_id"], gid)) else None
+                    if pid != r[0]["persona_id"]:
+                        move_pfile(fid, gid, pid)
+                return self.send(200, {"ok": True, "files": pfile_rows(gid)})
+            if p and len(p) == 2 and p[0] == "bimages" and p[1].isdigit():  # {memo, chat_id(null = 안 이음), idx}
+                r = db.q("SELECT bot_id, chat_id, idx FROM bimages WHERE id=?", (int(p[1]),))
+                if not r:
+                    return self.send(404, {"error": "그림이 없어요"})
+                bid = r[0]["bot_id"]
+                if "memo" in d:
+                    db.x("UPDATE bimages SET memo=? WHERE id=?", (str(d["memo"] or "").strip()[:2000], int(p[1])))
+                if "chat_id" in d or "idx" in d:
+                    cid, idx = bimage_link(bid, d["chat_id"] if "chat_id" in d else r[0]["chat_id"], d["idx"] if "idx" in d else r[0]["idx"])
+                    db.x("UPDATE bimages SET chat_id=?, idx=? WHERE id=?", (cid, idx, int(p[1])))
+                return self.send(200, {"ok": True, "images": bimage_rows(bid)})
+            if p and len(p) == 2 and p[0] == "pimages" and p[1].isdigit():  # {memo, persona_id(null = 폴더 공통)}
+                r = db.q("SELECT group_id FROM pimages WHERE id=?", (int(p[1]),))
+                if not r:
+                    return self.send(404, {"error": "그림이 없어요"})
+                gid = r[0]["group_id"]
+                if "memo" in d:
+                    db.x("UPDATE pimages SET memo=? WHERE id=?", (str(d["memo"] or "").strip()[:2000], int(p[1])))
+                if "persona_id" in d:
+                    pid = d["persona_id"]
+                    pid = pid if isinstance(pid, int) and db.q("SELECT 1 FROM personas WHERE id=? AND group_id=?", (pid, gid)) else None
+                    db.x("UPDATE pimages SET persona_id=? WHERE id=?", (pid, int(p[1])))
+                return self.send(200, {"ok": True, "images": pimage_rows(gid)})
+            if p and len(p) == 2 and p[0] == "pgroups" and p[1].isdigit():  # {name, order: [버전 id…]} (맨 앞 = 대표)
+                gid = int(p[1])
+                if not db.q("SELECT 1 FROM pgroups WHERE id=?", (gid,)):
+                    return self.send(404, {"error": "페르소나가 없어요"})
+                if name := str(d.get("name") or "").strip()[:100]:
+                    db.x("UPDATE pgroups SET name=?, updated=? WHERE id=?", (name, now(), gid))
+                if "ptype" in d:
+                    db.x("UPDATE pgroups SET ptype=? WHERE id=?", (ptype_ok(d["ptype"]), gid))
+                if isinstance(d.get("order"), list):
+                    for i, vid in enumerate(d["order"], 1):
+                        if isinstance(vid, int):
+                            db.x("UPDATE personas SET sort=? WHERE id=? AND group_id=?", (i, vid, gid))
+                return self.send(200, pgroup_detail(gid))
+            if p and len(p) == 2 and p[0] == "style_variants" and p[1].isdigit():
+                v = db.q("SELECT style_id FROM style_variants WHERE id=?", (int(p[1]),))
+                if not v:
+                    return self.send(404, {"error": "변형이 없어요"})
+                if vals := variant_vals(d):
+                    vals["updated"] = now()
+                    db.x(f"UPDATE style_variants SET {', '.join(k + '=?' for k in vals)} WHERE id=?", (*vals.values(), int(p[1])))
+                return self.send(200, style_detail(v[0]["style_id"]))
+            if p and len(p) == 2 and p[0] == "sgallery" and p[1].isdigit():  # {memo, variant_id(null = 공통, 0 = 기본)}
+                r = db.q("SELECT style_id FROM sgallery WHERE id=?", (int(p[1]),))
+                if not r:
+                    return self.send(404, {"error": "그림이 없어요"})
+                sid = r[0]["style_id"]
+                if "memo" in d:
+                    db.x("UPDATE sgallery SET memo=? WHERE id=?", (str(d["memo"] or "").strip()[:2000], int(p[1])))
+                if "variant_id" in d:
+                    vid = d["variant_id"]
+                    vid = None if vid is None else (0 if vid == 0 else style_variant_ok(sid, vid) or None)
+                    db.x("UPDATE sgallery SET variant_id=? WHERE id=?", (vid, int(p[1])))
+                return self.send(200, {"ok": True, "gallery": sgallery_rows(sid)})
             if p and len(p) == 2 and p[0] == "style_images" and p[1].isdigit():
                 g = db.q("SELECT style_id FROM style_images WHERE id=?", (int(p[1]),))
                 if not g:
@@ -2693,6 +3378,8 @@ class Handler(BaseHTTPRequestHandler):
                     vals["series"] = str(d["series"] or "").strip()[:60]
                 if "ep" in d:
                     vals["ep"] = d["ep"] if isinstance(d["ep"], int) and 0 <= d["ep"] <= 9999 else None
+                if "persona_id" in d:
+                    vals["persona_id"] = persona_ok(d["persona_id"])
                 if vals:
                     vals["updated"] = now()
                     db.x(f"UPDATE chats SET {', '.join(k + '=?' for k in vals)} WHERE id=?", (*vals.values(), int(p[1])))
@@ -2800,6 +3487,34 @@ class Handler(BaseHTTPRequestHandler):
         threading.Thread(target=run_import, args=(tok,), daemon=True).start()
         return self.send(200, {"ok": True})
 
+    def put_pfile(self, gid, params):
+        """페르소나 자료실 파일 원본 (persona = 버전 id, 빈칸이면 폴더 공통)."""
+        self.close_connection = True
+        if not db.q("SELECT 1 FROM pgroups WHERE id=?", (gid,)):
+            return self.send(404, {"error": "페르소나가 없어요"})
+        pid = int(params["persona"]) if params.get("persona", "").isdigit() else None
+        if pid and not db.q("SELECT 1 FROM personas WHERE id=? AND group_id=?", (pid, gid)):
+            return self.send(404, {"error": "이 폴더의 버전이 아니에요"})
+        name = re.sub(r'[\x00-\x1f/\\]', "_", params.get("name") or "file").strip()[:200] or "file"
+        n = int(self.headers.get("Content-Length", "0"))
+        if not 0 < n <= MAX_FILE:
+            return self.send(413, {"error": f"파일은 {MAX_FILE // 1_000_000_000}GB까지 올릴 수 있어요"})
+        TMP.mkdir(exist_ok=True)
+        tmp = TMP / (secrets.token_hex(12) + ".part")
+        left = n
+        with open(tmp, "wb") as fh:
+            while left > 0:
+                chunk = self.rfile.read(min(1 << 20, left))
+                if not chunk:
+                    break
+                fh.write(chunk)
+                left -= len(chunk)
+        if left:
+            tmp.unlink(missing_ok=True)
+            return self.send(400, {"error": "업로드가 중간에 끊겼어요"})
+        fid = add_pfile(gid, pid, tmp, name, n, params.get("kind", ""))
+        return self.send(200, {"ok": True, "id": fid, "files": pfile_rows(gid)})
+
     def put_upload(self, params):
         """파일 원본을 그대로 받아 디스크에 씀 (1MB씩)."""
         self.close_connection = True
@@ -2872,13 +3587,67 @@ class Handler(BaseHTTPRequestHandler):
                 db.x(f"UPDATE {t} SET {col}=? WHERE {col}=?", (to, p[1]))
                 db.x(f"DELETE FROM {p[0]} WHERE key=?", (p[1],))
                 return self.send(200, {"ok": True, "state": state()})
+            if p and len(p) == 2 and p[0] == "pfiles" and p[1].isdigit():
+                r = db.q("SELECT group_id FROM pfiles WHERE id=?", (int(p[1]),))
+                if not r:
+                    return self.send(404, {"error": "파일이 없어요"})
+                drop_pfiles("id=?", int(p[1]))
+                return self.send(200, {"ok": True, "files": pfile_rows(r[0]["group_id"])})
+            if p and len(p) == 2 and p[0] == "personas" and p[1].isdigit():
+                pid = int(p[1])
+                if not db.q("SELECT 1 FROM personas WHERE id=?", (pid,)):
+                    return self.send(404, {"error": "페르소나가 없어요"})
+                gid = db.q("SELECT group_id FROM personas WHERE id=?", (pid,))[0]["group_id"]
+                drop_persona(pid)
+                return self.send(200, {"ok": True, "group": gid if pgroup_ok(gid) else None})
+            if p and len(p) == 2 and p[0] == "bimages" and p[1].isdigit():
+                r = db.q("SELECT bot_id, image FROM bimages WHERE id=?", (int(p[1]),))
+                if not r:
+                    return self.send(404, {"error": "그림이 없어요"})
+                db.x("DELETE FROM bimages WHERE id=?", (int(p[1]),))
+                self.gc_intro(f" /m/{r[0]['image']}")
+                return self.send(200, {"ok": True, "images": bimage_rows(r[0]["bot_id"])})
+            if p and len(p) == 2 and p[0] == "pimages" and p[1].isdigit():
+                r = db.q("SELECT group_id, image FROM pimages WHERE id=?", (int(p[1]),))
+                if not r:
+                    return self.send(404, {"error": "그림이 없어요"})
+                db.x("DELETE FROM pimages WHERE id=?", (int(p[1]),))
+                drop_media(r[0]["image"])
+                return self.send(200, {"ok": True, "images": pimage_rows(r[0]["group_id"])})
+            if p and len(p) == 2 and p[0] == "pgroups" and p[1].isdigit():  # 폴더째: 버전 전부
+                gid = int(p[1])
+                if not db.q("SELECT 1 FROM pgroups WHERE id=?", (gid,)):
+                    return self.send(404, {"error": "페르소나가 없어요"})
+                for r in db.q("SELECT id FROM personas WHERE group_id=?", (gid,)):
+                    drop_persona(r["id"])
+                pgroup_prune(gid)
+                return self.send(200, {"ok": True})
             if p and len(p) == 4 and p[0] == "styles" and p[1].isdigit() and p[2] == "bots" and p[3].isdigit():
                 db.x("DELETE FROM bot_styles WHERE style_id=? AND bot_id=?", (int(p[1]), int(p[3])))
                 return self.send(200, style_detail(int(p[1])) or {"ok": True})
+            if p and len(p) == 2 and p[0] == "style_variants" and p[1].isdigit():  # 그 변형 견본은 지우고, 갤러리 그림은 그림체 공통으로
+                v = db.q("SELECT style_id FROM style_variants WHERE id=?", (int(p[1]),))
+                if not v:
+                    return self.send(404, {"error": "변형이 없어요"})
+                imgs = [g["image"] for g in db.q("SELECT image FROM style_images WHERE variant_id=?", (int(p[1]),))]
+                db.x("DELETE FROM style_images WHERE variant_id=?", (int(p[1]),))
+                db.x("UPDATE sgallery SET variant_id=NULL WHERE variant_id=?", (int(p[1]),))
+                db.x("DELETE FROM style_variants WHERE id=?", (int(p[1]),))
+                drop_media(*imgs)
+                return self.send(200, style_detail(v[0]["style_id"]))
+            if p and len(p) == 2 and p[0] == "sgallery" and p[1].isdigit():
+                r = db.q("SELECT style_id, image FROM sgallery WHERE id=?", (int(p[1]),))
+                if not r:
+                    return self.send(404, {"error": "그림이 없어요"})
+                db.x("DELETE FROM sgallery WHERE id=?", (int(p[1]),))
+                drop_media(r[0]["image"])
+                return self.send(200, {"ok": True, "gallery": sgallery_rows(r[0]["style_id"])})
             if p and len(p) == 2 and p[0] in ("styles", "style_images") and p[1].isdigit():
                 id = int(p[1])
                 if p[0] == "styles":
-                    imgs = [g["image"] for g in db.q("SELECT image FROM style_images WHERE style_id=?", (id,))]
+                    imgs = [g["image"] for g in db.q("SELECT image FROM style_images WHERE style_id=? UNION ALL SELECT image FROM sgallery WHERE style_id=?", (id, id))]
+                    db.x("DELETE FROM sgallery WHERE style_id=?", (id,))
+                    db.x("DELETE FROM style_variants WHERE style_id=?", (id,))
                     db.x("DELETE FROM styles WHERE id=?", (id,))
                     drop_media(*imgs)
                     return self.send(200, {"ok": True})
@@ -2897,6 +3666,7 @@ class Handler(BaseHTTPRequestHandler):
                     return self.send(404, {"error": "봇이 없어요"})
                 files = db.q("SELECT file, path FROM files WHERE bot_id=?", (id,))
                 imgs = [m["image"] for m in db.q("SELECT m.image FROM marks m JOIN chats c ON c.id=m.chat_id WHERE c.bot_id=? AND m.image IS NOT NULL", (id,))]
+                imgs += [r["image"] for r in db.q("SELECT image FROM bimages WHERE bot_id=?", (id,))]
                 intros = "".join(v["h"] for v in db.q("SELECT intro_html || COALESCE(basic, '') AS h FROM versions WHERE bot_id=?", (id,))) + "".join(
                     i["html"] for i in db.q("SELECT i.html FROM intros i JOIN versions v ON v.id=i.version_id WHERE v.bot_id=?", (id,)))
                 db.x("DELETE FROM bots WHERE id=?", (id,))
@@ -2940,6 +3710,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send(200, {"ok": True, "bot": bot_detail(i["bot_id"])})
             if p[0] == "chats":
                 imgs = [m["image"] for m in db.q("SELECT image FROM marks WHERE chat_id=? AND image IS NOT NULL", (id,))]
+                db.x("UPDATE bimages SET chat_id=NULL, idx=NULL WHERE chat_id=?", (id,))  # 봇 그림은 남기고 잇기만 풂
                 db.x("DELETE FROM chats WHERE id=?", (id,))
                 self.gc_intro("".join(f" /m/{n}" for n in imgs))
                 return self.send(200, {"ok": True})

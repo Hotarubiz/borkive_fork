@@ -88,9 +88,12 @@ cd app; $env:DATA_DIR = "..\data"; python server.py   # 윈도우 PowerShell
   - `bots`: 봇과 자료함 자료를 같이 담아요. `itype`이 `''`이면 봇, 값이 있으면 자료 종류 키예요.
   - `versions`, `files`, `intros`, `links`
   - `chats`, `messages`, `marks`
+  - `bimages`: 봇 그림 탭(채팅하며 만든 그림). `chat_id` · `idx`(메시지 0부터)로 그 채팅 자리를 이어 둠(`bimage_link`가 그 봇 채팅인지 · 메시지 번호가 있는지 확인). 채팅을 지우면 잇기만 풀고, 봇을 지우면 같이 지워요. 그림 탭에는 장면(`marks.image`) 그림도 같이 보여요(`scene_pics`). 채팅 화면 주소 `#/c/<id>/<메시지 번호(1부터)>`는 그 메시지로 스크롤
   - `folders`: `scope`가 `bot`이면 서재 폴더, `item`이면 자료함 폴더, `style`이면 그림체 폴더예요. 봇·자료는 `bot_folders`, 그림체는 `style_folders`로 이어져요.
   - `statuses`, `itypes`, `stypes`: 이름표 표 (기본 몇 개 + 사용자가 더한 것). `stypes`는 그림체 분류
   - `styles`, `style_images`, `style_folders`, `bot_styles`: 그림체(프롬프트·설정 + 견본 그림), 그림체 폴더, 봇 ↔ 그림체(`role` official|mine)
+  - `style_variants` · `sgallery`: 그림체 변형(`styles` 줄 = '기본' 변형, 이름은 `styles.vlabel`, 화면에서는 id 0) · 갤러리(`variant_id` NULL = 그림체 공통, 0 = 기본). `style_images.variant_id` NULL = 기본 변형 견본(목록 표지는 기본 견본부터). 변형을 지우면 그 견본은 지우고 갤러리 그림은 공통으로. 나눔 파일엔 변형까지, 전부 내보내기엔 갤러리도(`갤러리/` 파일, json은 file로 가리킴)
+  - `pgroups` · `personas`: 페르소나 폴더(사람 하나)와 그 안의 버전(`group_id` · `label` · `sort`, 맨 앞이 대표). 버전 = 그림 한 장 + 프롬프트 + 메모. `pfiles`는 자료실(`persona_id` NULL = 폴더 공통, 원본은 버전 자료 `data/personas/<버전 id 4자리>/` · 공통 `data/personas/g<폴더 id 4자리>/`, 버전↔공통으로 바꾸면 `move_pfile`이 옮김, 버전을 지우면 그 버전 자료도 지움). 예전 `personas.module`은 켤 때 `pfiles`로 옮겨지고 비어 있어요. 마지막 버전을 지우면 폴더도 지워요. `pimages`는 폴더 갤러리(`persona_id` NULL = 폴더 공통, 버전을 지우면 공통으로, 폴더를 지우면 같이 지움). 페르소나 자료는 파일 토큰 `pm:<경로>?<수정 시각>`(`pfile_token`)으로 봇 파일처럼 로어북 · 에셋을 읽어요(`fpath`). `pgroups.ptype`은 `ptypes` 이름표(기본 male 남캐 · female 여캐, '' = 분류 없음 — 지운 분류도 여기로). `chats.persona_id`는 그 로그의 페르소나 버전, `bots.persona_id`는 새 로그에 알아서 붙일 기본 페르소나 (NULL = 지정 안 함)
   - `settings`, `sessions`: 잠금 설정과 로그인
   - `shelves`: 예전 자료함 칸
 - 그림은 `data/media/`, 백업은 `data/backups/`.
@@ -99,7 +102,7 @@ cd app; $env:DATA_DIR = "..\data"; python server.py   # 윈도우 PowerShell
   - 옮기기는 `place_file()`만 써요. 새 자리를 먼저 적고(`moving` = 예전 자리) 옮겨서, 중간에 꺼져도 켤 때 `settle_files()`가 마저 옮겨요.
   - 봇 폴더마다 `info.txt`(사람용 메모)를 봇카이브가 고쳐 써요. 거꾸로 읽지는 않아요.
   - 예전 `data/files/`(무작위 이름)는 켤 때 자동으로 봇 폴더로 옮겨져요.
-- `GET /api/export`: 전부 내보내기 zip을 흘려보내요(`봇/<첫 폴더>/<봇>/<버전 이름>/` · `자료함/<종류>/` · `그림체/<분류>/` · `봇카이브.json`).
+- `GET /api/export`: 전부 내보내기 zip을 흘려보내요(`봇/<첫 폴더>/<봇>/<버전 이름>/` · `자료함/<종류>/` · `그림체/<분류>/` · `페르소나/<분류>/<폴더>/<버전>/` · `봇카이브.json`). 페르소나는 봇·로그가 내보낸 서재의 페르소나 id로 가리키고, 그림이 PNG면 리스 페르소나 조각(tEXt `persona`)을 넣어요.
 - 들이기(`/api/import`): zip을 64MB 이하 조각으로 `data/tmp/import-<토큰>.zip`에 이어 붙이고(같은 파일이면 받아 둔 데부터), `run`이면 스레드에서 `봇카이브.json`을 따라 새로 만들어요. 소개글은 `Cleaner`로 다시 정리하고, 원본은 `tmp/`에 풀어 `place_file`로 옮겨요. 중간에 실패하면 이번에 만든 봇·그림체·그림을 걷어 내요. 내보내기에 칸을 더하면 들이기(`_import_zip`)도 같이 고치고, 시험은 내보내기 → 빈 서재로 들이기 → DB·원본 해시 비교로 해요.
 
 ### 규칙
