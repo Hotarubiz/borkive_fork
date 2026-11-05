@@ -1,0 +1,19 @@
+# 봇카이브 + PocketRisu 연동(botkive-link/4) 이미지. 기본 이미지(python:3.12-slim)에 cryptography만 더해요.
+# 코드(app/)를 이미지 안에 넣어서, Container Manager·Portainer에서 자료 폴더 하나만 연결하면 돼요.
+# 빌드·켜기: docker compose up -d --build (docker-compose.yml이 이 파일을 써요)
+FROM python:3.12-slim
+COPY requirements-secure-link.lock /tmp/requirements-secure-link.lock
+RUN pip install --no-cache-dir --only-binary=:all: --require-hashes -r /tmp/requirements-secure-link.lock \
+ && rm /tmp/requirements-secure-link.lock \
+ && python -c "import cryptography.hazmat.primitives.ciphers.aead as a; a.AESGCM(bytes(32))"
+COPY app/ /app/
+COPY docker/entrypoint.py /entrypoint.py
+# 컨테이너 안쪽 값(바꿀 일 없음). 밖으로 여는 주소·포트는 docker-compose.yml의 ports가 정해요.
+ENV DATA_DIR=/data PORT=8391 HOST=0.0.0.0 TRUST_GATEWAY=1 BOTKIVE_LINK=1 PYTHONDONTWRITEBYTECODE=1
+WORKDIR /app
+EXPOSE 8391
+# Container Manager·Portainer에서 '정상(healthy)'으로 보이게 해요.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
+  CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8391/api/health', timeout=4)"
+# 처음엔 root로 시작해 /data 권한을 맞추고, 바로 보통 사용자로 바꿔 서버를 켜요(docker/entrypoint.py).
+ENTRYPOINT ["python", "/entrypoint.py"]

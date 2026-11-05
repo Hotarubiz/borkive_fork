@@ -1,28 +1,42 @@
-# 봇카이브 — docker compose up -d 로 켜고, 브라우저에서 http://127.0.0.1:8391 (포트는 .env의 BOTSHELF_PORT)
-# 처음 켜기 전에 mkdir data (도커가 대신 만들면 관리자 소유가 돼서 앱이 못 씀)
-# 로그인이 없는 앱이라 이 컴퓨터(127.0.0.1)에만 열어 둠. 휴대폰 등에서 쓰려면 README의 'Tailscale로 내 기기에서만 열기'
+# 봇카이브 (PocketRisu 연동 포함) — 설치 안내: README.md
+#
+# 바꿀 수 있는 값은 아래 ${이름:-기본값} 자리예요. 세 가지 방법 중 편한 것 하나로 바꿔요.
+#   - Portainer: 스택 화면의 'Environment variables'에 이름과 값을 넣어요.
+#   - Container Manager: 이 파일과 같은 폴더의 .env에 적거나, 편집 화면에서 ':-' 뒤의 기본값을 직접 고쳐요.
+#   - 터미널: .env.example을 .env로 복사해 고쳐요.
+# 아무것도 안 바꾸면: 이 컴퓨터(127.0.0.1)의 8391 포트에서만 열리고, 자료는 이 폴더의 data, 연동은 꺼진 채예요.
 services:
-  botshelf:
-    image: python:3.12-slim
-    container_name: botshelf
-    user: "${BOTSHELF_UID:-1000}:${BOTSHELF_GID:-1000}"
-    working_dir: /app
-    command: ["python", "-u", "server.py"]
+  botkive:
+    build:
+      context: .
+      dockerfile: Dockerfile.link
+    image: botkive-link:local
+    pull_policy: build                 # 다시 배포할 때마다 받은 코드로 이미지를 새로 만들어요(바뀐 게 없으면 금방 끝나요)
+    container_name: botkive
+    labels:
+      # NAS에서 직접 만든 이미지라 워치타워가 받아 올 곳이 없어요. 업데이트는 안내서의 '업데이트할 때'로 해요.
+      - com.centurylinklabs.watchtower.enable=false
     environment:
-      - DATA_DIR=/data
-      - PORT=8391
-      - HOST=0.0.0.0
-      - TRUST_GATEWAY=1          # 이 컴퓨터에서 바로 연 요청을 알아보기 (잠금 '밖에서만' 모드)
-      - RESET_AUTH=${BOTSHELF_RESET_AUTH:-}
+      # PocketRisu·브라우저에서 쓰는 봇카이브 도메인(예: xxx.xxxx.synology.me). https://는 알아서 붙여요. 비워 두면 연동만 꺼져요.
+      - BOTKIVE_LINK_ORIGIN=${BOTKIVE_LINK_ORIGIN:-}
       - TZ=${TZ:-Asia/Seoul}
+      # 비밀번호를 잊었을 때만 1 → 다시 배포 → 풀리면 다시 비우고 배포
+      - RESET_AUTH=${BOTSHELF_RESET_AUTH:-}
+      # 보통은 비워 두세요. 비우면 자료 폴더 주인에 맞춰 자동으로 골라요(권한 문제 해결).
+      - PUID=${BOTSHELF_UID:-}
+      - PGID=${BOTSHELF_GID:-}
     volumes:
-      - ./app:/app:ro
-      - ./data:/data
+      # 자료 폴더. NAS·Portainer에서는 절대 경로를 권해요(예: /volume1/docker/botkive/data).
+      - ${BOTSHELF_DATA_DIR:-./data}:/data
     ports:
-      - "127.0.0.1:${BOTSHELF_PORT:-8391}:8391"
+      # 기본은 이 컴퓨터(127.0.0.1)에서만. DSM 역방향 프록시가 NAS 내부 IP로 연결하면 BOTSHELF_BIND_IP에 그 IP를 적어요.
+      # 0.0.0.0(모든 주소)은 쓰지 마세요.
+      - "${BOTSHELF_BIND_IP:-127.0.0.1}:${BOTSHELF_PORT:-8391}:8391"
+    security_opt:
+      - no-new-privileges:true
     restart: unless-stopped
     stop_grace_period: 10s
     deploy:
       resources:
         limits:
-          memory: 256M
+          memory: 4G  # 상한이에요. 평소에 이만큼 차지하지는 않아요(큰 카드를 받을 때만 더 써요).

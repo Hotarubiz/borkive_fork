@@ -1,0 +1,6 @@
+# 이미지 빌드에 필요한 것만 보내요. data(사용자 자료)·.git·시험·문서는 보내지 않아요(빌드가 느려지고 자료가 이미지에 섞이지 않게).
+*
+!app/
+!docker/
+!requirements-secure-link.lock
+app/__pycache__/

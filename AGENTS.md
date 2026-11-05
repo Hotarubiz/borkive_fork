@@ -28,7 +28,7 @@
 
 ### 2. 받기
 ```bash
-git clone https://github.com/redarchive77-coder/botkive.git
+git clone https://github.com/Hotarubiz/borkive_fork.git botkive
 cd botkive
 ```
 git이 없으면 저장소 페이지에서 ZIP으로 받아 풀어도 돼요.
@@ -38,9 +38,10 @@ git이 없으면 저장소 페이지에서 ZIP으로 받아 풀어도 돼요.
 mkdir data                 # 꼭 먼저 만들기 — 도커가 만들면 root 소유가 돼서 앱이 못 씀
 docker compose up -d
 ```
-- 리눅스: `id -u`·`id -g`가 1000이 아니면 `.env.example`을 `.env`로 복사해 `BOTSHELF_UID`·`BOTSHELF_GID`를 맞추고 다시 `docker compose up -d` 하세요.
+- `data` 권한은 시작 도우미(`docker/entrypoint.py`)가 폴더 주인에 맞춰 자동으로 맞춰요. 특정 번호로 돌려야 할 때만 `.env`의 `BOTSHELF_UID`·`BOTSHELF_GID`를 적어요.
+- NAS(Container Manager)·Portainer는 `README.md`의 '설치'를 따르세요.
 - 8391 포트가 이미 쓰이고 있으면 `.env`의 `BOTSHELF_PORT`를 바꾸세요.
-- 확인: `curl http://127.0.0.1:8391/api/health` 에서 `{"ok": true, ...}` 가 나와야 해요. 안 되면 `docker logs botshelf` 를 보세요.
+- 확인: `curl http://127.0.0.1:8391/api/health` 에서 `{"ok": true, ...}` 가 나와야 해요. 안 되면 `docker logs botkive` 를 보세요.
 - 컴퓨터를 켤 때 같이 켜지려면 Docker Desktop의 'Start when you sign in'만 켜 두면 돼요. compose에 `restart: unless-stopped`가 있어요.
 
 ### 3-B. 파이썬 방법
@@ -63,15 +64,15 @@ cd app; $env:DATA_DIR = "..\data"; python server.py   # 윈도우 PowerShell
 ### 막힐 때
 | 증상 | 원인·해결 |
 |---|---|
-| `PermissionError` / `unable to open database file` | `data/` 소유자 문제. 리눅스는 UID·GID 맞추기, 또는 `sudo chown -R $(id -u):$(id -g) data` (사용자 확인 후) |
+| `PermissionError` / `unable to open database file` | `data/` 권한 문제. 로그의 `[시작]` 줄을 보세요. 보통 자동으로 맞춰지고, NAS 공유 폴더 ACL이면 안내서의 권한 부분 |
 | `address already in use` | 포트 충돌. `.env`의 `BOTSHELF_PORT` 바꾸기 (파이썬 방법은 `PORT=8392`) |
-| 컨테이너가 계속 다시 켜짐 | `docker logs botshelf`로 오류 보기 |
+| 컨테이너가 계속 다시 켜짐 | `docker logs botkive`로 오류 보기 |
 | 모듈 로어북·에셋이 안 보임 | `app/rpack_map.bin`이 빠졌는지 확인 |
 | 비밀번호를 잊음 | 도커: `.env`에 `BOTSHELF_RESET_AUTH=1` → `docker compose up -d` → 풀리면 다시 비우고 `up -d`. 파이썬: `RESET_AUTH=1`을 붙여 한 번 켜기 |
 | 화면이 옛날 그대로 | 브라우저 새로고침 (캐시) |
 
 ### 업데이트·지우기
-- 업데이트: `git pull` 다음 `docker compose restart` (파이썬 방법은 껐다 켜기). 새 DB 칸은 켤 때 자동으로 더해져요.
+- 업데이트: `git pull` 다음 `docker compose up -d --build` (코드가 이미지 안에 있어요. 파이썬 방법은 껐다 켜기). 새 DB 칸은 켤 때 자동으로 더해져요.
 - 지우기: `docker compose down` 후 폴더를 지우면 돼요. **`data/`는 사용자 자료라 지우기 전에 꼭 물어보세요.**
 
 ## 코드 고치기
@@ -81,7 +82,7 @@ cd app; $env:DATA_DIR = "..\data"; python server.py   # 윈도우 PowerShell
   - 환경 변수: `DATA_DIR`(기본 `/data`) · `PORT`(8391) · `HOST`(127.0.0.1)
 - `app/index.html`: CSS · HTML · JS가 다 든 한 파일짜리 화면. 해시 라우팅(`#/all`, `#/b/<id>`, `#/c/<id>`, `#/shelf` …).
 - `app/rpack_map.bin`: 리스 모듈(.risum) 읽기 표 (THIRD_PARTY_NOTICES.md 참고).
-- `docker-compose.yml`: `python:3.12-slim` 이미지에 `app/`을 읽기 전용으로, `data/`를 쓰기용으로 붙여요. 이미지를 따로 빌드하지 않아요.
+- `docker-compose.yml`: `Dockerfile.link`로 이미지를 만들어요(`python:3.12-slim` + 해시 고정 `cryptography` + `app/` 복사). 컨테이너에는 `data/`만 쓰기용으로 붙여요. `docker/entrypoint.py`가 `data` 권한을 맞추고 보통 사용자로 서버를 켜요.
 
 ### 데이터
 - `data/botshelf.db` 표:
@@ -89,7 +90,7 @@ cd app; $env:DATA_DIR = "..\data"; python server.py   # 윈도우 PowerShell
   - `versions`, `files`, `intros`, `links`
   - `chats`, `messages`, `marks`
   - `bimages`: 봇 그림 탭(채팅하며 만든 그림). `chat_id` · `idx`(메시지 0부터)로 그 채팅 자리를 이어 둠(`bimage_link`가 그 봇 채팅인지 · 메시지 번호가 있는지 확인). 채팅을 지우면 잇기만 풀고, 봇을 지우면 같이 지워요. 그림 탭에는 장면(`marks.image`) 그림도 같이 보여요(`scene_pics`). 채팅 화면 주소 `#/c/<id>/<메시지 번호(1부터)>`는 그 메시지로 스크롤
-  - `folders`: `scope`가 `bot`이면 서재 폴더, `item`이면 자료함 폴더, `style`이면 그림체 폴더예요. 봇·자료는 `bot_folders`, 그림체는 `style_folders`로 이어져요.
+  - `folders`: `scope`가 `bot`이면 서재 폴더, `item`이면 자료함 폴더, `style`이면 그림체 폴더예요. 봇·자료는 `bot_folders`, 그림체는 `style_folders`로 이어져요. 폴더 없는 봇은 `file_unfiled`가 `받은 봇`에 넣어요.
   - `statuses`, `itypes`, `stypes`: 이름표 표 (기본 몇 개 + 사용자가 더한 것). `stypes`는 그림체 분류
   - `styles`, `style_images`, `style_folders`, `bot_styles`: 그림체(프롬프트·설정 + 견본 그림), 그림체 폴더, 봇 ↔ 그림체(`role` official|mine)
   - `style_variants` · `sgallery`: 그림체 변형(`styles` 줄 = '기본' 변형, 이름은 `styles.vlabel`, 화면에서는 id 0) · 갤러리(`variant_id` NULL = 그림체 공통, 0 = 기본). `style_images.variant_id` NULL = 기본 변형 견본(목록 표지는 기본 견본부터). 변형을 지우면 그 견본은 지우고 갤러리 그림은 공통으로. 나눔 파일엔 변형까지, 전부 내보내기엔 갤러리도(`갤러리/` 파일, json은 file로 가리킴)
@@ -135,5 +136,5 @@ cd app; $env:DATA_DIR = "..\data"; python server.py   # 윈도우 PowerShell
 5. 다 쓴 시험 서버는 **내가 띄운 프로세스만** 끄세요.
 
 ### 고친 뒤 반영
-- `index.html`만 바꿨으면 브라우저 새로고침이면 돼요.
-- `server.py`를 바꿨으면 `docker compose restart` 하세요 (파이썬 방법은 껐다 켜기).
+- 도커: `app/` 안의 무엇을 바꿨든 `docker compose up -d --build` 하세요(코드가 이미지 안에 있어요).
+- 파이썬 방법: `index.html`만 바꿨으면 브라우저 새로고침, `server.py`를 바꿨으면 껐다 켜기.

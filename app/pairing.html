@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>PocketRisu 연결 관리 · 봇카이브</title>
+<link rel="stylesheet" href="/pairing/app.css">
+</head>
+<body>
+<main class="pa">
+  <header class="pa-head">
+    <h1>PocketRisu 연결 관리</h1>
+    <p class="pa-pill">botkive-link/4</p>
+  </header>
+  <p class="pa-note">PocketRisu 플러그인이 이 봇카이브에 캐릭터를 등록할 때 쓰는 페어링 코드를 만들고 폐기해요.</p>
+
+  <p id="pa-status" class="pa-status" role="status" aria-live="polite"></p>
+
+  <section id="pa-nopass" class="pa-card" hidden>
+    <h2>비밀번호가 필요해요</h2>
+    <p>페어링 코드는 서재에 접근하는 열쇠라서, 봇카이브 비밀번호 없이는 관리할 수 없어요. 봇카이브 설정의 '잠금'에서 비밀번호를 먼저 정해 주세요. 잠금 방식은 '꺼짐'이어도 괜찮아요.</p>
+  </section>
+
+  <section id="pa-unlock" class="pa-card" hidden>
+    <h2>관리하려면 비밀번호를 확인해요</h2>
+    <form id="pa-unlock-form" autocomplete="off">
+      <label for="pa-password">봇카이브 비밀번호</label>
+      <input id="pa-password" type="password" autocomplete="current-password" required>
+      <button class="pa-btn pa-btn--primary" type="submit">확인</button>
+    </form>
+    <p class="pa-hint">확인 뒤 10분 동안만 관리할 수 있어요. 이 컴퓨터에서 열어도 비밀번호를 물어요.</p>
+  </section>
+
+  <section id="pa-admin" hidden>
+    <div class="pa-bar">
+      <span id="pa-left" class="pa-hint"></span>
+      <button id="pa-lock" class="pa-btn" type="button">관리 끝내기</button>
+    </div>
+
+    <section class="pa-card" aria-labelledby="pa-new-title">
+      <h2 id="pa-new-title">새 페어링 코드 만들기</h2>
+      <form id="pa-issue" autocomplete="off">
+        <label for="pa-label">연결 이름 <span class="pa-hint">(구분용, 1~40자)</span></label>
+        <input id="pa-label" maxlength="40" required placeholder="예: 집 PC PocketRisu">
+        <label for="pa-library">서재</label>
+        <input id="pa-library" readonly>
+        <label for="pa-source">PocketRisu 출처 식별자 <span class="pa-hint">(영문·숫자·_·- 16~80자)</span></label>
+        <input id="pa-source" required pattern="[A-Za-z0-9_\-]{16,80}" spellcheck="false">
+        <fieldset>
+          <legend>허용 권한</legend>
+          <label class="pa-check"><input type="checkbox" name="right" value="read" checked> 읽기 (read) — 등록 기록 조회만</label>
+          <label class="pa-check"><input type="checkbox" name="right" value="prepare"> 등록 준비 (prepare) — 수신함에 자료 올리기</label>
+          <label class="pa-check"><input type="checkbox" name="right" value="commit"> 등록 (commit) — 서재에 캐릭터 추가</label>
+          <p id="pa-risk" class="pa-warn" hidden>등록 준비·등록 권한이 있는 코드를 가진 사람은 이 서재에 자료를 올릴 수 있어요. 꼭 필요할 때만 고르세요.</p>
+        </fieldset>
+        <button class="pa-btn pa-btn--primary" type="submit">코드 만들기</button>
+      </form>
+    </section>
+
+    <section id="pa-issued" class="pa-card pa-card--code" hidden aria-labelledby="pa-issued-title">
+      <h2 id="pa-issued-title">새 페어링 코드</h2>
+      <p class="pa-warn">이 코드는 지금 한 번만 보여 줘요. 이 창을 닫으면 다시 볼 수 없어요. 잃어버리면 폐기하고 새로 만들어 주세요.</p>
+      <p id="pa-issued-target" class="pa-hint"></p>
+      <div class="pa-code">
+        <input id="pa-code" type="password" readonly aria-label="페어링 코드" spellcheck="false">
+        <button id="pa-show" class="pa-btn" type="button" aria-pressed="false">보이기</button>
+        <button id="pa-copy" class="pa-btn" type="button">복사</button>
+      </div>
+      <p id="pa-copied" class="pa-hint" role="status" aria-live="polite"></p>
+      <p class="pa-hint">복사한 코드는 클립보드에 남아 다른 프로그램도 읽을 수 있어요. PocketRisu에 붙여 넣은 뒤에는 다른 글을 복사해 클립보드를 덮어 주세요.</p>
+      <button id="pa-done" class="pa-btn pa-btn--primary" type="button">저장했어요 · 코드 지우기</button>
+    </section>
+
+    <section class="pa-card" aria-labelledby="pa-list-title">
+      <h2 id="pa-list-title">발급한 연결</h2>
+      <p class="pa-hint">코드 원문은 저장하지 않아 다시 보여 줄 수 없어요. 키 식별자는 비밀이 아닌 공개 값이에요.</p>
+      <div class="pa-tablewrap">
+        <table>
+          <thead><tr><th>연결 이름</th><th>서재</th><th>출처</th><th>권한</th><th>생성 시각</th><th>상태</th><th>키 식별자</th><th></th></tr></thead>
+          <tbody id="pa-rows"></tbody>
+        </table>
+      </div>
+      <p id="pa-empty" class="pa-hint" hidden>아직 발급한 연결이 없어요.</p>
+    </section>
+  </section>
+
+  <dialog id="pa-confirm" aria-labelledby="pa-confirm-title">
+    <form method="dialog">
+      <h2 id="pa-confirm-title">이 연결을 폐기할까요?</h2>
+      <p id="pa-confirm-text"></p>
+      <p class="pa-warn">폐기하면 이 코드로는 다시 접속할 수 없어요. 되돌릴 수 없어요.</p>
+      <label for="pa-confirm-kid">확인하려면 키 식별자를 그대로 적어 주세요</label>
+      <input id="pa-confirm-kid" autocomplete="off" spellcheck="false">
+      <div class="pa-bar">
+        <button class="pa-btn" value="cancel" type="submit">그만두기</button>
+        <button id="pa-confirm-ok" class="pa-btn pa-btn--danger" value="ok" type="submit" disabled>폐기</button>
+      </div>
+    </form>
+  </dialog>
+</main>
+<script src="/pairing/app.js"></script>
+</body>
+</html>

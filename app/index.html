@@ -1293,7 +1293,7 @@ function folderDialog(f, scope = 'bot') {
         <label class="field">이름<input class="inp" id="fname" maxlength="20" value="${h(f ? f.name : '')}" placeholder="예: 운영 봇"></label>
         <div class="field">색<div class="colors">${S.state.colors.map(c => `<button type="button" style="background:${c}" data-c="${c}" aria-pressed="${c === color}" aria-label="${c}"></button>`).join('')}</div></div>
       </div>
-      <footer>${f ? `<button class="btn ghost danger" data-del>${ic('trash', 16)}폴더 지우기</button>` : ''}<span class="note">${f ? ({item: '폴더를 지워도 자료는 자료함에 남아요', style: '폴더를 지워도 그림체는 남아요'}[scope] || '폴더를 지워도 봇은 서재에 남아요') : ''}</span>
+      <footer>${f ? `<button class="btn ghost danger" data-del>${ic('trash', 16)}폴더 지우기</button>` : ''}<span class="note">${f ? ({item: '폴더를 지워도 자료는 자료함에 남아요', style: '폴더를 지워도 그림체는 남아요'}[scope] || '폴더를 지워도 봇은 서재에 남아요. 다른 폴더가 없는 봇은 받은 봇으로 옮겨요') : ''}</span>
         <button class="btn" data-close>취소</button><button class="btn pri" data-ok>${f ? '저장' : '만들기'}</button></footer>`, 'narrow');
     $$('.colors button', m).forEach(b => b.onclick = () => { color = b.dataset.c; $$('.colors button', m).forEach(x => x.setAttribute('aria-pressed', x === b)); });
     const ok = async () => {
@@ -1309,7 +1309,7 @@ function folderDialog(f, scope = 'bot') {
     const del = $('[data-del]', m);
     if (del) del.onclick = async () => {
       m.close();
-      if (!await confirmBox('폴더 지우기', `<b>${h(f.name)}</b> 폴더를 지울까요? ${({item: '안에 있던 자료는 자료함에', style: '안에 있던 그림체는'}[scope]) || '안에 있던 봇은 서재에'} 그대로 남아요.`)) return res(null);
+      if (!await confirmBox('폴더 지우기', `<b>${h(f.name)}</b> 폴더를 지울까요? ${({item: '안에 있던 자료는 자료함에', style: '안에 있던 그림체는'}[scope]) || '안에 있던 봇은 서재에'} 그대로 남아요.${scope === 'item' || scope === 'style' ? '' : ' 다른 폴더가 없는 봇은 받은 봇으로 옮겨요.'}`)) return res(null);
       try { await api('DELETE', `/api/folders/${f.id}`); await loadState(); if (scope !== 'bot') { ss.set(scope === 'item' ? 'bs-ifolder' : 'bs-sfolder', ''); route(); } else location.hash = '#/'; res(null); } catch (e) { fail(e); }
     };
     $$('[data-close]', m).forEach(b => b.addEventListener('click', () => res(null)));
@@ -4612,5 +4612,7 @@ async function route() {
 window.addEventListener('hashchange', route);
 loadState().then(route).catch(e => { if (e.login) return; $('#view').innerHTML = `<div class="wrap"><div class="empty"><h3>서버에 연결하지 못했어요</h3><p>${h(e.message)}</p></div></div>`; });
 </script>
+<script src="/bulk.js"></script>
+<script src="/link-ui.js"></script>
 </body>
 </html>

@@ -210,6 +210,7 @@ CREATE INDEX IF NOT EXISTS pfiles_group ON pfiles(group_id);
 CREATE TABLE IF NOT EXISTS ptypes (key TEXT PRIMARY KEY, name TEXT NOT NULL, color TEXT, sort INTEGER DEFAULT 0, builtin INTEGER DEFAULT 0);
 """
 DEFAULT_FOLDERS = [("운영 봇", "#F2B655"), ("자작 봇", "#5EC2B7"), ("받은 봇", "#B9A6F5"), ("해 볼 것", "#8FB8E8")]
+UNFILED_FOLDER = DEFAULT_FOLDERS[2]  # 폴더 없는 봇이 들어가는 곳
 DEFAULT_SHELVES = ["공용 모듈", "프롬프트 프리셋", "참고 그림"]
 
 
@@ -438,10 +439,33 @@ def clean(data, fields):
     return out
 
 
+def file_unfiled(conn, bot_id=None):
+    """폴더 없는 봇을 '받은 봇'에 넣고 그 봇 id를 돌려줘요. 폴더가 없어졌으면 이때 다시 만들어요. 자료함 자료는 그대로예요."""
+    sql = "SELECT b.id FROM bots b WHERE COALESCE(b.itype, '')='' AND NOT EXISTS (SELECT 1 FROM bot_folders x WHERE x.bot_id=b.id)"
+    ids = [r[0] for r in conn.execute(sql + " AND b.id=?", (bot_id,))] if bot_id else [r[0] for r in conn.execute(sql)]
+    if not ids:
+        return ids
+    name, color = UNFILED_FOLDER
+    hit = conn.execute("SELECT id FROM folders WHERE name=? AND COALESCE(scope, 'bot')='bot' ORDER BY id", (name,)).fetchone()
+    fid = hit[0] if hit else conn.execute(
+        "INSERT INTO folders(name, color, sort, created, scope) VALUES (?,?,(SELECT COALESCE(MAX(sort),0)+1 FROM folders),?,'bot')",
+        (name, color, now())).lastrowid
+    conn.executemany("INSERT OR IGNORE INTO bot_folders(bot_id, folder_id) VALUES (?,?)", [(i, fid) for i in ids])
+    return ids
+
+
+def file_unfiled_bots(bot_id=None):
+    with db.lock:
+        ids = file_unfiled(db.c, bot_id)
+        db.c.commit()
+    return ids
+
+
 def set_folders(bot_id, ids):
     ok = {f["id"] for f in db.q("SELECT id FROM folders")}
     db.x("DELETE FROM bot_folders WHERE bot_id=?", (bot_id,))
     db.many("INSERT OR IGNORE INTO bot_folders(bot_id, folder_id) VALUES (?,?)", [(bot_id, int(i)) for i in ids if str(i).isdigit() and int(i) in ok])
+    file_unfiled_bots(bot_id)
 
 
 def save_data_url(data_url):
@@ -501,6 +525,29 @@ def free_name(name, taken):
     if not isinstance(taken, Path):
         taken.add(cand.lower())
     return cand
+
+
+def download_name(token):
+    """내려받을 때 쓸 파일 이름. 없는 파일이면 None.
+    연동으로 등록한 카드는 저장 이름이 모두 character.charx라서 봇 이름으로 받아요. 저장 이름은 그대로 둬요:
+    켤 때 파일을 저장 이름으로 옮기는데(place_file), 연동 기록 확인(checked_path)은 영문 경로만 받아요."""
+    r = db.q("SELECT f.name, f.kind, b.name AS bot FROM files f LEFT JOIN bots b ON b.id=f.bot_id WHERE f.file=?", (token,))
+    if not r:
+        return None
+    f = r[0]
+    if f["name"] == "character.charx" and f["kind"] == "card" and f["bot"]:
+        return safe_name(f["bot"], "character", 114) + ".charx"
+    return f["name"] or "file"
+
+
+def delete_bot_row(bot_id):
+    """봇 줄을 지워요. 연동으로 등록한 봇이면 등록 기록도 같이 지워서 PocketRisu에서 다시 보낼 수 있게 해요.
+    기록만 남으면 등록 기준표가 '불일치'가 되어 플러그인 조회가 전부 막혀요."""
+    with db.lock:
+        if db.c.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='link_jobs'").fetchone():
+            db.c.execute("DELETE FROM link_jobs WHERE bot=?", (bot_id,))
+        db.c.execute("DELETE FROM bots WHERE id=?", (bot_id,))
+        db.c.commit()
 
 
 def bot_home(bot_id, itype):
@@ -1618,7 +1665,10 @@ def import_zip(path, job):
     made = {"bots": [], "styles": [], "personas": [], "pgroups": [], "media": []}
     try:
         with z:
-            return _import_zip(z, job, made)
+            out = _import_zip(z, job, made)
+        for bid in file_unfiled_bots():
+            write_info(bid)
+        return out
     except Exception:
         for pid in made["personas"]:
             drop_persona(pid)
@@ -2478,9 +2528,11 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", ctype)
         self.send_header("Cache-Control", cache)
         self.send_header("Content-Length", str(len(body)))
+        given = {k.lower() for k, _ in headers}  # 페이지가 자기 보안 머리글을 주면 그걸 써요(페어링 관리 창)
         for k, v in SECURITY_HEADERS.items():
-            self.send_header(k, v)
-        if ctype.startswith("text/html"):
+            if k.lower() not in given:
+                self.send_header(k, v)
+        if ctype.startswith("text/html") and "content-security-policy" not in given:
             self.send_header("Content-Security-Policy", CSP)
         self.end_headers()
         self.wfile.write(body)
@@ -2759,9 +2811,19 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         parts, params = self.route()
+        if parts[:3] == ["api", "sync", "v2"]:
+            return self.sync_request("/".join(parts[3:]))
+        if parts[:2] == ["api", "link"] and parts[2:3] in (["v3"], ["v4"]):
+            return self.link_request(parts[2], "/".join(parts[3:]))
+        if parts[:2] == ["api", "pairing"] or parts[:1] == ["pairing"]:
+            return self.pairing_request(parts)
         try:
             if not parts or parts == ["index.html"]:
                 return self.send(200, (APP / "index.html").read_bytes(), "text/html; charset=utf-8", "no-cache")
+            if parts == ["bulk.js"]:
+                return self.send(200, (APP / "bulk.js").read_bytes(), "text/javascript; charset=utf-8", "no-cache")
+            if parts == ["link-ui.js"]:  # PocketRisu 연결 단추(연동이 켜졌을 때만 단추를 만들어요)
+                return self.send(200, (APP / "link-ui.js").read_bytes(), "text/javascript; charset=utf-8", "no-cache")
             if parts == ["api", "auth"]:
                 return self.send(200, self.auth_info())
             if parts == ["api", "health"] and not self.authed():
@@ -2771,10 +2833,10 @@ class Handler(BaseHTTPRequestHandler):
             if parts[0] == "m" and len(parts) == 2 and re.fullmatch(MEDIA_RE, parts[1]):
                 return self.send_file(MEDIA / parts[1], CTYPES[parts[1].rsplit(".", 1)[1]])
             if parts[0] == "f" and len(parts) == 2 and re.fullmatch(FILE_RE, parts[1]):
-                r = db.q("SELECT name FROM files WHERE file=?", (parts[1],))
-                if not r:
+                name = download_name(parts[1])
+                if not name:
                     return self.send(404, {"error": "없음"})
-                return self.send_file(fpath(parts[1]), "application/octet-stream", r[0]["name"] or "file")
+                return self.send_file(fpath(parts[1]), "application/octet-stream", name)
             if parts[0] != "api":
                 return self.send(404, {"error": "없음"})
             p = parts[1:]
@@ -2890,9 +2952,80 @@ class Handler(BaseHTTPRequestHandler):
         except Exception as e:
             self.send(500, {"error": repr(e)})
 
+    def handle_expect_100(self):
+        parts, _ = self.route()
+        if parts[:3] == ["api", "sync", "v2"]:
+            self.close_connection = True
+            code = 410 if getattr(self.server, "registration_gateway", None) is None else 417
+            self.send(code, {"error": "본문 전송을 시작하지 마세요"})
+            return False
+        if parts[:2] == ["api", "link"] and parts[2:3] in (["v3"], ["v4"]):
+            self.close_connection = True
+            code = 410 if self.link_service(parts[2]) is None else 417
+            self.send(code, {"error": "본문 전송을 시작하지 마세요"})
+            return False
+        return super().handle_expect_100()
+
+    def sync_request(self, action, preflight=False):
+        self.close_connection = True
+        gateway = getattr(self.server, "registration_gateway", None)
+        if gateway is None:
+            return self.send(410, {"error": "자동 동기화는 종료됐어요. 로컬 CHARX 보관을 이용하세요."})
+        if self.command != "POST" or preflight:
+            return self.send(405, {"error": "지원하지 않는 요청"})
+        return gateway.handle(self, action)
+
+    def link_service(self, version):
+        # 판마다 따로 구성해요. v3 경로에 v4 봉투가 와도(반대도) 해당 판의 형식 검사에서 거절돼요.
+        return getattr(self.server, {"v3": "secure_link", "v4": "secure_link_v4"}[version], None)
+
+    def link_request(self, version, route):
+        # botkive-link/3·4 시험 경로. 일반 부팅은 둘 다 만들지 않아 항상 410이에요.
+        # CORS를 열지 않아요: 브라우저 직접 요청은 preflight에서 멈추고 본문을 보내지 않아요.
+        self.close_connection = True
+        link = self.link_service(version)
+        if link is None:
+            return self.send(410, {"error": "자동 동기화는 종료됐어요. 로컬 CHARX 보관을 이용하세요."})
+        if self.command != "POST":
+            return self.send(405, {"error": "지원하지 않는 요청"})
+        if self.path != f'/api/link/{version}/' + route:
+            return self.send(400, {"error": "잘못된 요청 경로"})
+        return link.handle(self, route)
+
+    def pairing_request(self, parts):
+        # 페어링 관리(합성 시험 구성에서만 있음). 일반 부팅은 만들지 않아 404예요.
+        # 기존 잠금이 켜져 있으면 그 로그인도 거쳐야 하고, 관리 요청은 따로 비밀번호를 다시 확인해요.
+        admin = getattr(self.server, "pairing_admin", None)
+        if admin is None:
+            self.close_connection = True
+            return self.send(404, {"error": "없음"})
+        if self.path.partition("?")[0] != "/" + "/".join(parts):
+            self.close_connection = True
+            return self.send(400, {"error": "잘못된 요청 경로"})
+        if not self.gate():
+            return
+        return admin.handle(self, parts)
+
+    def do_OPTIONS(self):
+        parts, _ = self.route()
+        if parts[:3] == ["api", "sync", "v2"]:
+            return self.sync_request("/".join(parts[3:]), preflight=True)
+        if parts[:2] == ["api", "link"] and parts[2:3] in (["v3"], ["v4"]):
+            return self.link_request(parts[2], "/".join(parts[3:]))
+        if parts[:2] == ["api", "pairing"] or parts[:1] == ["pairing"]:
+            return self.pairing_request(parts)
+        self.send(404, {"error": "없음"})
+
     def do_POST(self):
         parts, _ = self.route()
         try:
+            # 폐기된 경로는 인증 헤더·본문 처리 전에 종료해요.
+            if parts[:3] == ["api", "sync", "v2"]:
+                return self.sync_request("/".join(parts[3:]))
+            if parts[:2] == ["api", "link"] and parts[2:3] in (["v3"], ["v4"]):
+                return self.link_request(parts[2], "/".join(parts[3:]))
+            if parts[:2] == ["api", "pairing"] or parts[:1] == ["pairing"]:
+                return self.pairing_request(parts)
             if not self.write_ok():
                 return
             d = self.body()
@@ -3126,6 +3259,12 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_PUT(self):
         parts, params = self.route()
+        if parts[:3] == ["api", "sync", "v2"]:
+            return self.sync_request("/".join(parts[3:]))
+        if parts[:2] == ["api", "link"] and parts[2:3] in (["v3"], ["v4"]):
+            return self.link_request(parts[2], "/".join(parts[3:]))
+        if parts[:2] == ["api", "pairing"] or parts[:1] == ["pairing"]:
+            return self.pairing_request(parts)
         try:
             if not self.write_ok():
                 return
@@ -3564,6 +3703,12 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_DELETE(self):
         parts, _ = self.route()
+        if parts[:3] == ["api", "sync", "v2"]:
+            return self.sync_request("/".join(parts[3:]))
+        if parts[:2] == ["api", "link"] and parts[2:3] in (["v3"], ["v4"]):
+            return self.link_request(parts[2], "/".join(parts[3:]))
+        if parts[:2] == ["api", "pairing"] or parts[:1] == ["pairing"]:
+            return self.pairing_request(parts)
         try:
             if not self.write_ok():
                 return
@@ -3669,7 +3814,7 @@ class Handler(BaseHTTPRequestHandler):
                 imgs += [r["image"] for r in db.q("SELECT image FROM bimages WHERE bot_id=?", (id,))]
                 intros = "".join(v["h"] for v in db.q("SELECT intro_html || COALESCE(basic, '') AS h FROM versions WHERE bot_id=?", (id,))) + "".join(
                     i["html"] for i in db.q("SELECT i.html FROM intros i JOIN versions v ON v.id=i.version_id WHERE v.bot_id=?", (id,)))
-                db.x("DELETE FROM bots WHERE id=?", (id,))
+                delete_bot_row(id)
                 for f in files:
                     drop_file(f)
                 drop_home(id)
@@ -3717,6 +3862,9 @@ class Handler(BaseHTTPRequestHandler):
             if p[0] == "shelves":  # 칸을 지워도 파일은 '칸 없음'으로 남김
                 db.x("UPDATE files SET shelf_id=NULL WHERE shelf_id=?", (id,))
             db.x(f"DELETE FROM {p[0]} WHERE id=?", (id,))
+            if p[0] == "folders":  # 다른 폴더가 없던 봇은 '받은 봇'으로
+                for bid in file_unfiled_bots():
+                    write_info(bid)
             return self.send(200, {"ok": True, "state": state()})
         except Exception as e:
             self.send(500, {"error": repr(e)})
@@ -3750,7 +3898,18 @@ def backup_loop():
         time.sleep(6 * 3600)
 
 
-if __name__ == "__main__":
+def create_http_server(address, handler_class=Handler, *, registration_gateway=None, secure_link=None,
+                       secure_link_v4=None, pairing_admin=None):
+    http = ThreadingHTTPServer(address, handler_class)
+    http.pairing_admin = pairing_admin
+    http.registration_gateway = registration_gateway
+    http.secure_link = secure_link
+    http.secure_link_v4 = secure_link_v4
+    return http
+
+
+def main(handler_class=Handler):
+    global db
     MEDIA.mkdir(parents=True, exist_ok=True)
     for t in [*FILES.glob("*.part"), *TMP.glob("*.part")]:
         t.unlink()
@@ -3758,6 +3917,7 @@ if __name__ == "__main__":
         if time.time() - t.stat().st_mtime > 3 * 86400:
             t.unlink()
     db = DB(DATA / "botshelf.db")
+    file_unfiled_bots()  # settle_files가 info.txt를 다시 써요
     settle_files()
     if os.environ.get("RESET_AUTH") == "1":  # 비밀번호를 잊었을 때: 잠금 끄고 비밀번호·로그인 지움
         db.x("DELETE FROM settings WHERE key IN ('auth_mode', 'auth_hash')")
@@ -3765,5 +3925,14 @@ if __name__ == "__main__":
         print("잠금을 풀었어요 (RESET_AUTH) — 이제 RESET_AUTH 줄을 지우고 다시 켜 주세요", flush=True)
     threading.Thread(target=backup_loop, daemon=True).start()
     threading.Thread(target=info_loop, daemon=True).start()
+    link, admin = None, None
+    if os.environ.get("BOTKIVE_LINK") == "1":  # PocketRisu 연동은 운영자가 명시적으로 켤 때만 (기본 꺼짐)
+        import link_service
+        link, admin = link_service.configure(DATA, os.environ, password_hash=lambda: setting("auth_hash"),
+                                             check_password=pw_ok, log=lambda m: print(m, flush=True))
     print(f"봇카이브 http://{HOST}:{PORT}", flush=True)
-    ThreadingHTTPServer((HOST, PORT), Handler).serve_forever()
+    create_http_server((HOST, PORT), handler_class, secure_link_v4=link, pairing_admin=admin).serve_forever()
+
+
+if __name__ == "__main__":
+    main()
