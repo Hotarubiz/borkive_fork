@@ -106,6 +106,16 @@ button{cursor:pointer}
 .nav .n{margin-left:auto;font-size:12.5px;color:var(--mute);font-variant-numeric:tabular-nums}
 .nav .dot{width:10px;height:10px;border-radius:3px;flex:none}
 .sideh{display:flex;align-items:center;justify-content:space-between;padding:18px 12px 6px;font-size:12px;font-weight:600;letter-spacing:.08em;color:var(--mute)}
+.sideh>span{display:flex;gap:2px}
+.ford{display:flex;flex-direction:column;gap:6px}
+.fdr{display:flex;align-items:center;gap:10px;padding:8px 10px 8px 12px;border:1px solid var(--line2);border-radius:12px;background:var(--card2);cursor:grab;user-select:none}
+.fdr.dragging{opacity:.5;border-style:dashed}
+.fdr b{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:600}
+.fdr .dot{width:10px;height:10px;border-radius:4px;flex:none}
+.fgrip{color:var(--mute);letter-spacing:-2px;font-size:13px}
+.fdr [data-mv] svg{transform:rotate(90deg)}
+.fdr .dn svg{transform:rotate(-90deg)}
+.fdr .ib:disabled{opacity:.3;cursor:default}
 .ib{width:32px;height:32px;border-radius:8px;border:0;background:none;color:var(--ink3);display:grid;place-items:center}
 .ib:hover{background:var(--card2);color:var(--ink)}
 .side .grow{flex:1}
@@ -916,6 +926,7 @@ const ICON = {
   img: '<path d="M4 5h16v14H4zM4 16l5-5 4 4 2-2 5 5"/><circle cx="15.5" cy="9" r="1.5"/>',
   folder: '<path d="M3 6h6l2 2h10v11H3z"/>',
   inbox: '<path d="M4 13l2.5-8h11l2.5 8v6H4zM4 13h5l1 2h4l1-2h5"/>',
+  order: '<path d="M8 20V4M4 8l4-4 4 4M16 4v16M12 16l4 4 4-4"/>',
   back: '<path d="M15 5l-7 7 7 7"/>',
   play: '<path d="M8 5l11 7-11 7z"/>',
   search: '<circle cx="11" cy="11" r="6"/><path d="M20 20l-4.5-4.5"/>',
@@ -1058,7 +1069,7 @@ function renderSide() {
     <a class="nav" href="#/personas"${cur('/personas')}${r.startsWith('/p/') ? ' aria-current="page"' : ''}>${ic('user')}페르소나<span class="n">${st.personas || 0}</span></a>
     <a class="nav" href="#/shelf"${cur('/shelf')}>${ic('box')}자료함<span class="n">${st.items}</span></a>
     <a class="nav" href="#/styles"${cur('/styles')}>${ic('brush')}그림체<span class="n">${st.styles}</span></a>
-    <div class="sideh">폴더<button class="ib" data-act="newfolder" aria-label="새 폴더">${ic('plus', 16)}</button></div>
+    <div class="sideh">폴더<span>${botFolders().length > 1 ? `<button class="ib" data-act="folderorder" aria-label="폴더 순서 바꾸기" title="순서 바꾸기">${ic('order', 16)}</button>` : ''}<button class="ib" data-act="newfolder" aria-label="새 폴더">${ic('plus', 16)}</button></span></div>
     ${botFolders().map(f => `<a class="nav" href="#/f/${f.id}"${cur('/f/' + f.id)}><span class="dot" style="background:${f.color}"></span>${h(f.name)}<span class="n">${f.count}</span></a>`).join('')}
     <div class="grow"></div>
     <button class="nav" data-act="settings" style="border:0;background:none;width:100%;margin-top:12px">${ic('gear')}설정</button>
@@ -1069,6 +1080,7 @@ document.addEventListener('click', e => {
   if (!a) return;
   const act = a.dataset.act;
   if (act === 'add') { document.body.classList.remove('drawer'); addBot(); }
+  if (act === 'folderorder') folderOrder('bot');
   if (act === 'newfolder') folderDialog().then(f => f && loadState().then(() => document.body.classList.contains('entry') && route()));
   if (act === 'theme') { document.body.classList.remove('drawer'); themeDialog(); }
   if (act === 'lock') { document.body.classList.remove('drawer'); lockDialog(); }
@@ -1359,6 +1371,29 @@ function labelDialog(t, after) {
 }
 
 // ---- 폴더 만들기·고치기 ----
+// 폴더 순서: 끌어다 놓거나 ↑↓ (봇·자료함·그림체 폴더는 칸마다 따로)
+function folderOrder(scope) {
+  let list = S.state.folders.filter(f => (f.scope || 'bot') === scope);
+  const m = modal(`<header><h2>폴더 순서</h2><span>${{bot: '서재', item: '자료함', style: '그림체'}[scope]} 폴더</span>${xBtn}</header>
+    <div class="bd"><div class="ford" id="ford"></div></div>
+    <footer><span class="note">끌어다 놓거나 화살표로 옮겨요</span><button class="btn" data-close>취소</button><button class="btn pri" data-ok>저장</button></footer>`, 'narrow');
+  let drag = null;
+  const draw = () => {
+    $('#ford', m).innerHTML = list.map((f, i) => `<div class="fdr" draggable="true" data-i="${i}"><span class="fgrip" aria-hidden="true">⋮⋮</span><span class="dot" style="background:${f.color}"></span>
+      <b>${h(f.name)}</b><button class="ib" data-mv="-1" aria-label="위로"${i ? '' : ' disabled'}>${ic('back', 15)}</button><button class="ib dn" data-mv="1" aria-label="아래로"${i < list.length - 1 ? '' : ' disabled'}>${ic('back', 15)}</button></div>`).join('');
+    $$('.fdr', m).forEach(el => {
+      const i = +el.dataset.i;
+      $$('[data-mv]', el).forEach(b => b.onclick = () => { const j = i + +b.dataset.mv; [list[i], list[j]] = [list[j], list[i]]; draw(); $(`.fdr[data-i="${j}"] [data-mv="${b.dataset.mv}"]`, m)?.focus(); });
+      el.ondragstart = e => { drag = i; el.classList.add('dragging'); e.dataTransfer.effectAllowed = 'move'; };
+      el.ondragend = () => { drag = null; el.classList.remove('dragging'); };
+      el.ondragover = e => { if (drag == null || drag === i) return; e.preventDefault(); const [x] = list.splice(drag, 1); list.splice(i, 0, x); drag = i; draw(); $(`.fdr[data-i="${i}"]`, m).classList.add('dragging'); };
+    });
+  };
+  draw();
+  $('[data-ok]', m).onclick = async () => {
+    try { await api('PUT', '/api/folders/order', {ids: list.map(f => f.id)}); m.close(); await loadState(); route(); toast('폴더 순서를 바꿨어요'); } catch (e) { fail(e); }
+  };
+}
 function folderDialog(f, scope = 'bot') {
   if (f) scope = f.scope || 'bot';
   return new Promise(res => {
@@ -4836,7 +4871,8 @@ async function viewItems() {
       <div class="tagbar" id="ifBar"><span class="meta">${ic('folder', 14)} 폴더</span>
         ${folders.map(f => `<button class="pill ifp" data-if="${f.id}" aria-pressed="${fold === f.id}" style="--fc:${f.color}"><i></i>${h(f.name)}<span class="c">${f.count}</span></button>`).join('')}
         <button class="btn sm ghost" id="ifEdit"${fold ? '' : ' hidden'}>${ic('edit', 14)}폴더 고치기</button>
-        <button class="btn sm ghost" id="ifNew">${ic('plus', 14)}${folders.length ? '' : '자료함 '}폴더</button></div>
+        <button class="btn sm ghost" id="ifNew">${ic('plus', 14)}${folders.length ? '' : '자료함 '}폴더</button>
+        ${folders.length > 1 ? `<button class="btn sm ghost" id="ifOrd" title="폴더 순서 바꾸기">${ic('order', 14)}순서</button>` : ''}</div>
       <div class="grid" id="grid">${items.map(card).join('')}</div>
       <p class="hint" id="noHit" hidden style="padding:30px 0;text-align:center">맞는 자료가 없어요</p>`
     : `<div class="empty"><h3>아직 자료가 없어요</h3><p>모듈(.risum)·프리셋·로어북·플러그인 파일을 넣어 보세요. 봇처럼 버전·소개글·링크를 붙여 둘 수 있어요.</p><button class="btn pri" data-iadd>${ic('plus')}자료 들이기</button></div>`}
@@ -4858,6 +4894,7 @@ async function viewItems() {
   });
   $('#ifEdit').onclick = () => folderDialog(folderById(fold)).then(() => loadState().then(route));
   $('#ifNew').onclick = () => folderDialog(null, 'item').then(f => f && loadState().then(route));
+  if ($('#ifOrd')) $('#ifOrd').onclick = () => folderOrder('item');
   $('#q').addEventListener('input', filter);
   $('#bSort').onchange = e => {
     bsort = e.target.value; try { localStorage.setItem('bs-sort', bsort); } catch (er) {}
@@ -5033,6 +5070,7 @@ async function viewStyles() {
         ${folders.map(f => `<button class="pill ifp" data-if="${f.id}" aria-pressed="${fold === f.id}" style="--fc:${f.color}"><i></i>${h(f.name)}<span class="c">${f.count}</span></button>`).join('')}
         <button class="btn sm ghost" id="ifEdit"${fold ? '' : ' hidden'}>${ic('edit', 14)}폴더 고치기</button>
         <button class="btn sm ghost" id="ifNew">${ic('plus', 14)}${folders.length ? '' : '그림체 '}폴더</button>
+        ${folders.length > 1 ? `<button class="btn sm ghost" id="ifOrd" title="폴더 순서 바꾸기">${ic('order', 14)}순서</button>` : ''}
         <button class="btn sm ghost" id="sExp" style="margin-left:auto" title="지금 보이는 그림체를 파일 하나로">${ic('dl', 14)}보이는 것 내보내기</button></div>
       <div class="grid" id="grid">${list.map(card).join('')}</div>
       <p class="hint" id="noHit" hidden style="padding:30px 0;text-align:center">맞는 그림체가 없어요</p>`
@@ -5055,6 +5093,7 @@ async function viewStyles() {
   });
   $('#ifEdit').onclick = () => folderDialog(folderById(fold)).then(() => loadState().then(route));
   $('#ifNew').onclick = () => folderDialog(null, 'style').then(f => f && loadState().then(route));
+  if ($('#ifOrd')) $('#ifOrd').onclick = () => folderOrder('style');
   $('#sExp').onclick = () => {
     const ids = $$('#grid .bc').filter(c => !c.hidden).map(c => c.getAttribute('href').split('/').pop());
     if (!ids.length) return toast('내보낼 그림체가 없어요', true);

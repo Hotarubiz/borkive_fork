@@ -31,6 +31,7 @@ API (JSON):
   POST   /api/bots/<id>/intro/fetch      {url, version_id?} 아카라이브 글 가져오기
   POST   /api/versions {bot_id, name, note, released, info, current}   PUT|DELETE /api/versions/<id>
          버전 = 업데이트 하나(카드·모듈·소개글 묶음). 버전 없는 봇 자료는 공통 자료.
+  PUT    /api/folders/order {ids}        폴더 순서 (보낸 순서대로)
   POST   /api/folders  PUT|DELETE /api/folders/<id>      POST /api/shelves  PUT|DELETE /api/shelves/<id>
   POST   /api/links    PUT|DELETE /api/links/<id>
   POST   /api/statuses {name, color}   PUT|DELETE /api/statuses/<key>   봇 상태 (기본 3개는 이름·색만, 더한 건 지우기도 — 지우면 그 봇은 '찜'으로)
@@ -3532,6 +3533,10 @@ class Handler(BaseHTTPRequestHandler):
                     vals["color"] = d["color"]
                 if vals:
                     db.x(f"UPDATE {p[0]} SET {', '.join(k + '=?' for k in vals)} WHERE key=?", (*vals.values(), p[1]))
+                return self.send(200, {"ok": True, "state": state()})
+            if p == ["folders", "order"]:  # {ids: [폴더 id…]} 이 순서대로 (한 칸 안에서)
+                ids = [i for i in d.get("ids") or [] if isinstance(i, int)]
+                db.many("UPDATE folders SET sort=? WHERE id=?", [(n, i) for n, i in enumerate(ids, 1)])
                 return self.send(200, {"ok": True, "state": state()})
             if p and len(p) == 2 and p[0] in ("folders", "shelves") and p[1].isdigit():
                 vals = {}
