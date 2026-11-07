@@ -1663,7 +1663,7 @@ async function addBot() {
 }
 
 // ---- 아카 글 붙여넣기: 글 속 링크(랠름·구글 드라이브·드롭박스 …)와 그림에서 봇 파일을 찾아 받고, 붙여넣은 글은 소개글로 ----
-const BOT_EXT = /\.(charx|risum|risup|risupreset|json|png|jpe?g|webp|zip)$/i;
+const BOT_EXT = /\.(charx|risum|risup|risupreset|json|png|jpe?g|zip)$/i;
 // 아카는 바깥 링크를 unsafelink.com/<원래 주소>로 감쌈
 function unwrapLink(u) {
   u = String(u || '').trim().replace(/[.,)\]>'"]+$/, '');
@@ -1695,10 +1695,11 @@ function linkSource(raw) {
     : {kind: 'link', label: '프로톤 드라이브', url: u, why: '암호(# 뒤)가 빠진 링크예요'};
   if (host === 'github.com' && (m = path.match(/^\/([^/]+\/[^/]+)\/blob\/(.+)$/))) return {kind: 'file', label: '깃허브', url: u, get: `https://raw.githubusercontent.com/${m[1]}/${m[2]}`};
   if (/^(chub\.ai|characterhub\.org)$/.test(host) && (m = path.match(/^\/characters\/([^/]+\/[^/?#]+)/))) return {kind: 'file', label: 'chub', url: u, get: `https://avatars.charhub.io/avatars/${m[1]}/chara_card_v2.png`};
-  if (BOT_EXT.test(path)) return {kind: 'file', label: host, url: u, get: x.href.replace(/^http:/, 'https:')};
+  // png·jpg 주소는 글 속 그림에 걸린 링크인 경우가 많아서 꺼 둔 채로 (카드 그림이면 켜서 받기)
+  if (BOT_EXT.test(path)) return {kind: 'file', label: host, url: u, get: x.href.replace(/^http:/, 'https:'), pic: /\.(png|jpe?g)$/i.test(path)};
   return null;
 }
-// 붙여넣은 글 → 받을 링크 목록 + 아카에 올린 그림 (그림은 원본으로 받아야 카드 정보가 남아 있음)
+// 붙여넣은 글 → 받을 링크 목록 (아카 자체 링크·그림은 빼고 — 아카 그림은 원본도 webp라 카드 정보가 거의 안 남음)
 function arcaScan(box) {
   const doc = new DOMParser().parseFromString(box.innerHTML, 'text/html');
   const urls = [...doc.querySelectorAll('a[href]')].map(a => a.getAttribute('href')).concat(box.innerText.match(/https?:\/\/[^\s<>"']+/g) || []);
@@ -1707,10 +1708,7 @@ function arcaScan(box) {
     const s = linkSource(u);
     if (s && !seen.has(s.get || s.url)) { seen.add(s.get || s.url); links.push(s); }
   }
-  const pics = [...new Set([...doc.querySelectorAll('img')].filter(i => !i.matches('.arca-emoticon,.emoji,.emo'))
-    .map(i => unwrapLink(i.getAttribute('src') || i.getAttribute('data-src'))).filter(u => /^https:\/\/[\w.-]*namu\.la\//.test(u) && !/emoticon|twemoji/.test(u)))]
-    .map(u => { const x = new URL(u); x.searchParams.set('type', 'orig'); return x.href; });
-  return {links, pics};
+  return links;
 }
 // 링크의 파일 받기 — stall 동안 한 조각도 안 오면 그만둠 (아카 그림 서버는 주소가 틀리면 답 없이 붙잡고 있음)
 async function grabFile(url, onProg, stall = 60000) {
@@ -1814,20 +1812,19 @@ function arcaPane(m, pane) {
     <div id="arFound"></div>`;
   $('#arBmk', m).onclick = e => { e.preventDefault(); toast('이 단추를 북마크바로 끌어다 놓은 뒤, 아카 글 화면에서 눌러 주세요'); };
   const box = $('#arPaste', m);
-  let found = {links: [], pics: []}, timer = 0;
+  let links = [], timer = 0;
   const draw = () => {
-    found = arcaScan(box);
+    links = arcaScan(box);
     const el = $('#arFound', m);
     if (!box.textContent.trim() && !box.querySelector('img')) { el.innerHTML = ''; return; }
-    const {links, pics} = found;
-    el.innerHTML = `<p class="legend">찾은 것<span>${links.length || pics.length ? '받을 것만 고르세요' : ''}</span></p>
-      ${links.length || pics.length ? '' : `<p class="hint">받을 링크를 못 찾았어요. 드래그해서 복사하면 링크 주소가 빠질 수 있으니 <b>Ctrl+A</b>로 통째로 복사해 보세요. 링크 없이 글만으로도 들일 수 있어요.</p>`}
+    el.innerHTML = `<p class="legend">찾은 것<span>${links.length ? '받을 것만 고르세요' : ''}</span></p>
+      ${links.length ? '' : `<p class="hint">받을 링크를 못 찾았어요. 드래그해서 복사하면 링크 주소가 빠질 수 있으니 <b>Ctrl+A</b>로 통째로 복사해 보세요. 링크 없이 글만으로도 들일 수 있어요.</p>`}
       <div class="arl">${links.map((s, i) => s.kind === 'link'
         ? `<div class="arr off"><span class="dk">${h(s.label)}</span><span class="dp">${h(s.url)}</span><span class="ars">${h(s.why)} — 링크는 보관해요</span></div>`
-        : `<label class="arr"><input type="checkbox" data-i="${i}" checked><span class="dk k-card">${h(s.label)}</span><span class="dp">${h(s.url)}</span><span class="ars" data-s="${i}"></span>${s.kind === 'proton'
+        : `<label class="arr"><input type="checkbox" data-i="${i}"${s.pic ? '' : ' checked'}><span class="dk${s.pic ? '' : ' k-card'}">${h(s.pic ? '그림 링크' : s.label)}</span><span class="dp">${h(s.url)}</span><span class="ars" data-s="${i}"></span>${s.kind === 'proton'
           ? `<input class="inp arpw" data-pw="${i}" placeholder="링크에 따로 건 암호 (있으면)" autocomplete="off">` : ''}</label>`).join('')}
-      ${pics.length ? `<label class="arr"><input type="checkbox" id="arPics"><span class="dk">그림</span><span class="dp">글 속 그림 ${pics.length}장 — 카드가 숨어 있는지 하나씩 받아 봐요</span><span class="ars" id="arPicSt"></span></label>` : ''}</div>
-      <div class="row" style="justify-content:flex-end;margin-top:12px"><button class="btn pri" id="arGo">${links.some(s => s.kind !== 'link') || pics.length ? '받아서 살펴보기' : '글만으로 들이기'}</button></div>`;
+</div>
+      <div class="row" style="justify-content:flex-end;margin-top:12px"><button class="btn pri" id="arGo">${links.some(s => s.kind !== 'link') ? '받아서 살펴보기' : '글만으로 들이기'}</button></div>`;
     $('#arGo', m).onclick = run;
   };
   box.onpaste = e => {
@@ -1847,7 +1844,7 @@ function arcaPane(m, pane) {
     $$('#arFound input', m).forEach(i => i.disabled = true);
     const files = [];  // {file, from}
     let errs = 0;
-    for (const [i, s] of found.links.entries()) {
+    for (const [i, s] of links.entries()) {
       const cb = $(`[data-i="${i}"]`, m), st = $(`[data-s="${i}"]`, m);
       if (!cb || !cb.checked) continue;
       st.textContent = '받는 중…';
@@ -1863,26 +1860,12 @@ function arcaPane(m, pane) {
         st.textContent = got.length === 1 && n === 1 ? `✓ ${got[0].name} · ${size(got[0].size)}` : `✓ 파일 ${n}개`;
       } catch (e) { st.textContent = '✗ ' + e.message; st.classList.add('bad'); errs++; }
     }
-    const pc = $('#arPics', m);
-    if (pc && pc.checked) {
-      const st = $('#arPicSt', m);
-      let hit = 0;
-      for (const [i, u] of found.pics.entries()) {
-        st.textContent = `살펴보는 중 ${i + 1}/${found.pics.length}${hit ? ` · 카드 ${hit}` : ''}`;
-        try {
-          const f = await grabFile(u, null, 20000);
-          const c = await readCard(f);
-          if (c && c.info && (c.info.lore != null || c.module)) { hit++; files.push({file: new File([f], `${fileSafe(c.name || '카드')}.${(f.name.match(/\.(png|jpe?g|webp)$/i) || [, 'png'])[1]}`), from: null}); }
-        } catch (e) {}
-      }
-      st.textContent = hit ? `✓ 카드 ${hit}장 찾음` : '카드는 없었어요';
-    }
     const sorted = await sortFiles(files.map(x => x.file));
     sorted.forEach((x, i) => { x.from = files[i].from; x.on = x.kind !== 'images'; });  // 카드가 아닌 그림은 빼 둠
     if (errs && !sorted.length && !await confirmBox('못 받았어요', '링크에서 파일을 하나도 받지 못했어요. 글과 링크만으로 들일까요? 파일은 나중에 봇 페이지에서 올려도 돼요.')) {
       go.disabled = false; box.contentEditable = 'true'; $$('#arFound input', m).forEach(i => i.disabled = false); return;
     }
-    arcaStep2(m, {html: box.innerHTML.trim(), hasText: !!box.textContent.trim() || !!box.querySelector('img'), art, links: found.links, files: sorted});
+    arcaStep2(m, {html: box.innerHTML.trim(), hasText: !!box.textContent.trim() || !!box.querySelector('img'), art, links, files: sorted});
   };
 }
 async function arcaStep2(m, ctx) {
@@ -1913,7 +1896,7 @@ async function arcaStep2(m, ctx) {
     </div>
     <div><p class="legend">받은 파일<span>${ctx.files.length ? '체크한 것만 들여요' : '없음 — 나중에 봇 페이지에서 올려도 돼요'}</span></p>
       <div class="arl">${ctx.files.map((x, i) => `<label class="arr"><input type="checkbox" data-f="${i}"${x.on ? ' checked' : ''}><span class="dk k-${x.kind}">${h(KIND[x.kind] || x.kind)}</span>
-        <span class="dp">${h(x.file.name)} · ${size(x.file.size)}${x.card ? ' · ' + h(verSum(x.card.info)) : ''}</span><span class="ars">${x.from ? h(x.from.label) : '글 속 그림'}</span></label>`).join('')}</div></div>
+        <span class="dp">${h(x.file.name)} · ${size(x.file.size)}${x.card ? ' · ' + h(verSum(x.card.info)) : ''}</span><span class="ars">${h(x.from.label)}</span></label>`).join('')}</div></div>
     ${ctx.hasText ? `<div class="row" style="gap:12px;align-items:center"><label class="tog" id="arIntroT" aria-pressed="true"><i></i>붙여넣은 글을 소개글로</label>
       <input class="inp" id="arTitle" placeholder="글 이름 (탭에 보여요)" value="${h(ctx.art.title)}" style="flex:1;min-width:180px;min-height:40px"></div>` : ''}
     <div class="prog" id="arProg" hidden><i></i></div>`;
