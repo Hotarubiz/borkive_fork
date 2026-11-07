@@ -755,6 +755,9 @@ def pick_src(a):
     return abs_url(src)
 
 
+ARCA_MEDIA = re.compile(r"ac[\w-]*\.arca\.live|(?:[\w-]+\.)*namu\.la", re.I)
+
+
 class Cleaner(HTMLParser):
     """허용한 태그·속성만 남김. 모르는 태그는 벗겨 내고 글자는 남긴다. src는 fix(url)로 바꿔 끼움(None이면 그림 빼기)."""
 
@@ -783,7 +786,7 @@ class Cleaner(HTMLParser):
             keep.append(("style", style))
         if tag == "a":
             href = abs_url(a.get("href"))
-            if re.match(r"https?://", href):
+            if re.match(r"https?://", href) and not ARCA_MEDIA.fullmatch(urlsplit(href).hostname or ""):  # 아카 그림 주소는 서명이 만료돼서 눌러도 오류만 — 링크는 빼고 그림만
                 keep.append(("href", href))
         if tag in ("img", "video"):
             src = pick_src(a)
