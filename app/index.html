@@ -656,6 +656,18 @@ img.emo{display:block;max-width:min(300px,100%);max-height:380px;width:auto;marg
 .ars{color:var(--mute);font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .ars:empty{display:none}
 .arr .arpw{grid-column:2/-1;width:auto;min-height:34px;font-size:13px}
+.pxl{display:flex;flex-direction:column;gap:6px;margin:-2px 0 4px 26px}
+.pxl .hint{margin:0}
+.pxg{border:1px solid var(--line);border-radius:12px;background:var(--sunk2);padding:6px 10px}
+.pxh{display:flex;align-items:center;gap:8px}
+.pxh label,.pxf label{display:flex;align-items:center;gap:8px;flex:1;min-width:0;font-size:13px;cursor:pointer}
+.pxh label .meta{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pxh input,.pxf input{width:16px;height:16px;accent-color:var(--acc);margin:0;flex:none}
+.pxh b{display:inline-flex;align-items:center;gap:5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pxf{display:flex;flex-direction:column;gap:4px;padding:6px 0 2px 24px}
+.pxf .dp{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--ink2)}
+.arh{display:flex;align-items:center;gap:6px;margin:10px 0 6px;font-size:13px;color:var(--ink3)}
+.hint.bad{color:var(--red)}
 .ars.bad{color:var(--red)}
 @media (max-width:700px){#addSub{display:none}.arr{grid-template-columns:auto auto minmax(0,1fr)}.arr.off{grid-template-columns:auto minmax(0,1fr)}.ars{grid-column:1/-1;white-space:normal}}
 .dierr p{margin:4px 0 0;font-size:12.5px;color:var(--mute)}
@@ -1779,22 +1791,14 @@ async function protonRelay(req, appVersion) {
   if (!r.headers.get('X-Proton')) { const d = await r.json().catch(() => ({})); throw new Error(d.error || `프로톤에 못 보냈어요 (${r.status})`); }
   return new Response([101, 204, 205, 304].includes(r.status) ? null : r.body, {status: r.status, headers: {'content-type': r.headers.get('content-type') || ''}});
 }
-// 프로톤 링크 → File 목록 (폴더면 안의 파일 전부, 하위 폴더 3단계까지)
-async function protonFiles(url, password, st) {
+// 프로톤 링크 → 파일 목록 [{name, path, size, get}] (폴더면 하위 폴더 3단계까지) — 받기 전에 고르게 함
+async function protonList(url, password) {
   const lib = await loadProton();
-  st('프로톤 링크 여는 중…');
-  let list;
-  try { list = await lib.open(url, password, protonRelay); } catch (e) {
-    throw e.needPassword ? new Error(password ? '암호가 틀렸어요' : '암호가 걸린 링크예요 — 옆 칸에 암호를 넣고 다시 해 주세요') : e;
+  try { return await lib.open(url, password, protonRelay); } catch (e) {
+    throw e.needPassword ? new Error(password ? '암호가 틀렸어요' : '암호가 걸린 링크예요 — 위 칸에 암호를 넣어 주세요') : e;
   }
-  const out = [];
-  for (const [i, x] of list.entries()) {
-    const label = `받는 중 ${i + 1}/${list.length} · ${x.name}`;
-    st(label);
-    out.push(await x.get((n, t) => st(`${label} ${size(n)}${t ? ` / ${size(t)}` : ''}`)));
-  }
-  return out;
 }
+const pdirOf = path => path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '';
 // 받은 .zip 안의 봇 파일 → File 목록 (봇 파일이 없으면 null — zip 그대로 둠)
 async function unzipBot(file) {
   let list;
@@ -1824,10 +1828,50 @@ function arcaPane(m, pane) {
       <div class="arl">${links.map((s, i) => s.kind === 'link'
         ? `<div class="arr off"><span class="dk">${h(s.label)}</span><span class="dp">${h(s.url)}</span><span class="ars">${h(s.why)} — 링크는 보관해요</span></div>`
         : `<label class="arr"><input type="checkbox" data-i="${i}"${s.pic ? '' : ' checked'}><span class="dk${s.pic ? '' : ' k-card'}">${h(s.pic ? '그림 링크' : s.label)}</span><span class="dp">${h(s.url)}</span><span class="ars" data-s="${i}"></span>${s.kind === 'proton'
-          ? `<input class="inp arpw" data-pw="${i}" placeholder="링크에 따로 건 암호 (있으면)" autocomplete="off">` : ''}</label>`).join('')}
+          ? `<input class="inp arpw" data-pw="${i}" placeholder="링크에 따로 건 암호 (있으면 넣고 Enter)" autocomplete="off">` : ''}</label>${s.kind === 'proton' ? `<div class="pxl" data-px="${i}"></div>` : ''}`).join('')}
 </div>
       <div class="row" style="justify-content:flex-end;margin-top:12px"><button class="btn pri" id="arGo">${links.some(s => s.kind !== 'link') ? '받아서 살펴보기' : '글만으로 들이기'}</button></div>`;
     $('#arGo', m).onclick = run;
+    links.forEach((s, i) => { if (s.kind === 'proton') showPx(i); });
+    $$('[data-pw]', m).forEach(x => x.onkeydown = e => { if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); showPx(+x.dataset.pw); } });
+  };
+  // 프로톤 링크는 열어서 파일 목록을 먼저 보여 줌: 바로 보이는 파일은 골라 두고, 폴더(보통 예전 버전)는 꺼 둠 → 고른 폴더는 따로 버전으로
+  const plists = new Map();
+  const pxKey = i => links[i].url + '|' + (($(`[data-pw="${i}"]`, m) || {}).value || '');
+  const showPx = async i => {
+    const el = $(`[data-px="${i}"]`, m), key = pxKey(i);
+    if (!el) return;
+    let c = plists.get(key);
+    if (!c) {
+      c = {p: protonList(links[i].url, key.slice(links[i].url.length + 1))};
+      plists.set(key, c);
+      c.p.then(l => { c.list = l; const top = l.map((x, k) => k).filter(k => !pdirOf(l[k].path)); c.pick = new Set(top.length ? top : l.map((x, k) => k)); }, e => { c.err = e; });
+    }
+    if (!c.list && !c.err) {
+      el.innerHTML = '<p class="hint">프로톤 파일 목록 받는 중…</p>';
+      await c.p.catch(() => {});
+      if (!el.isConnected || pxKey(i) !== key) return;
+    }
+    if (c.err) { el.innerHTML = `<p class="hint bad">${h(c.err.message)}</p>`; return; }
+    const groups = new Map();
+    c.list.forEach((x, k) => { const d = pdirOf(x.path); if (!groups.has(d)) groups.set(d, []); groups.get(d).push(k); });
+    const order = [...groups.keys()].sort((a, b) => (a ? 1 : 0) - (b ? 1 : 0) || b.localeCompare(a, 'ko', {numeric: true}));  // 바로 보이는 것 먼저, 폴더는 이름 큰 것(새것) 먼저
+    el.innerHTML = order.map((d, gi) => {
+      const ks = groups.get(d), tot = ks.reduce((n, k) => n + (c.list[k].size || 0), 0);
+      return `<div class="pxg"><div class="pxh"><label><input type="checkbox" data-pg="${gi}"><b>${d ? `${ic('folder', 14)}${h(d)}` : '바로 보이는 파일'}</b>
+          <span class="meta">${ks.length}개 · ${size(tot)}${d ? ' · 고르면 따로 버전으로' : ''}</span></label>${d ? '<button type="button" class="btn sm ghost" data-pt>파일 보기</button>' : ''}</div>
+        <div class="pxf"${d ? ' hidden' : ''}>${ks.map(k => `<label><input type="checkbox" data-pk="${k}"${c.pick.has(k) ? ' checked' : ''}><span class="dp">${h(c.list[k].name)}</span><span class="meta">${size(c.list[k].size || 0)}</span></label>`).join('')}</div></div>`;
+    }).join('');
+    const sync = () => $$('.pxg', el).forEach(g => {
+      const ks = $$('[data-pk]', g), on = ks.filter(x => x.checked).length, cb = $('[data-pg]', g);
+      cb.checked = on === ks.length; cb.indeterminate = on > 0 && on < ks.length;
+    });
+    $$('.pxg', el).forEach(g => {
+      $('[data-pg]', g).onchange = e => { const on = e.target.checked; $$('[data-pk]', g).forEach(x => { x.checked = on; x.onchange(); }); };
+      $$('[data-pk]', g).forEach(x => x.onchange = () => { x.checked ? c.pick.add(+x.dataset.pk) : c.pick.delete(+x.dataset.pk); sync(); });
+      if ($('[data-pt]', g)) $('[data-pt]', g).onclick = e => { const f = $('.pxf', g); f.hidden = !f.hidden; e.target.textContent = f.hidden ? '파일 보기' : '접기'; };
+    });
+    sync();
   };
   box.onpaste = e => {
     const got = pickArticle(e.clipboardData && e.clipboardData.getData('text/html'));
@@ -1844,7 +1888,7 @@ function arcaPane(m, pane) {
     const go = $('#arGo', m);
     go.disabled = true; box.contentEditable = 'false';
     $$('#arFound input', m).forEach(i => i.disabled = true);
-    const files = [];  // {file, from}
+    const files = [];  // {file, from, dir(프로톤 폴더 안 위치, 바로 보이는 건 '')}
     let errs = 0;
     for (const [i, s] of links.entries()) {
       const cb = $(`[data-i="${i}"]`, m), st = $(`[data-s="${i}"]`, m);
@@ -1852,18 +1896,28 @@ function arcaPane(m, pane) {
       st.textContent = '받는 중…';
       const prog = (n, t) => st.textContent = `받는 중 ${size(n)}${t ? ` / ${size(t)}` : ''}`;
       try {
-        const got = s.kind === 'proton' ? await protonFiles(s.url, ($(`[data-pw="${i}"]`, m) || {}).value || '', t => st.textContent = t)
-          : [s.kind === 'realm' ? (await realmFile(s.url, prog)).file : s.kind === 'mega' ? await megaFile(s.url, prog) : await grabFile(s.get, prog)];
+        let got = [];
+        if (s.kind === 'proton') {
+          const c = plists.get(pxKey(i)) || (await showPx(i), plists.get(pxKey(i)));
+          await c.p;
+          const pick = [...c.pick].sort((a, b) => a - b).map(k => c.list[k]);
+          if (!pick.length) { st.textContent = '고른 파일이 없어요'; continue; }
+          for (const [j, x] of pick.entries()) {
+            const label = `받는 중 ${j + 1}/${pick.length} · ${x.name}`;
+            st.textContent = label;
+            got.push({file: await x.get((n, t) => st.textContent = `${label} ${size(n)}${t ? ` / ${size(t)}` : ''}`), dir: pdirOf(x.path)});
+          }
+        } else got = [{file: s.kind === 'realm' ? (await realmFile(s.url, prog)).file : s.kind === 'mega' ? await megaFile(s.url, prog) : await grabFile(s.get, prog), dir: ''}];
         let n = 0;
-        for (const f of got) {
-          const inner = /\.zip$/i.test(f.name) ? await unzipBot(f) : null;
-          (inner || [f]).forEach(file => { files.push({file, from: s}); n++; });
+        for (const g of got) {
+          const inner = /\.zip$/i.test(g.file.name) ? await unzipBot(g.file) : null;
+          (inner || [g.file]).forEach(file => { files.push({file, from: s, dir: g.dir}); n++; });
         }
-        st.textContent = got.length === 1 && n === 1 ? `✓ ${got[0].name} · ${size(got[0].size)}` : `✓ 파일 ${n}개`;
+        st.textContent = got.length === 1 && n === 1 ? `✓ ${got[0].file.name} · ${size(got[0].file.size)}` : `✓ 파일 ${n}개`;
       } catch (e) { st.textContent = '✗ ' + e.message; st.classList.add('bad'); errs++; }
     }
     const sorted = await sortFiles(files.map(x => x.file));
-    sorted.forEach((x, i) => { x.from = files[i].from; x.on = x.kind !== 'images'; });  // 카드가 아닌 그림은 빼 둠
+    sorted.forEach((x, i) => { x.from = files[i].from; x.dir = files[i].dir; x.on = x.kind !== 'images'; });  // 카드가 아닌 그림은 빼 둠
     if (errs && !sorted.length && !await confirmBox('못 받았어요', '링크에서 파일을 하나도 받지 못했어요. 글과 링크만으로 들일까요? 파일은 나중에 봇 페이지에서 올려도 돼요.')) {
       go.disabled = false; box.contentEditable = 'true'; $$('#arFound input', m).forEach(i => i.disabled = false); return;
     }
@@ -1871,7 +1925,9 @@ function arcaPane(m, pane) {
   };
 }
 async function arcaStep2(m, ctx) {
-  const cards = ctx.files.filter(x => x.kind === 'card'), top = cards[0] && cards[0].card;
+  const dirs = [...new Set(ctx.files.map(x => x.dir))].sort((a, b) => (a ? 1 : 0) - (b ? 1 : 0) || b.localeCompare(a, 'ko', {numeric: true}));
+  const mainDir = dirs[0] || '', dirVer = d => d.split('/').pop();
+  const cards = ctx.files.filter(x => x.kind === 'card').sort((a, b) => (a.dir === mainDir ? 0 : 1) - (b.dir === mainDir ? 0 : 1)), top = cards[0] && cards[0].card;
   let cover = top && top.cover || null, status = 'later';
   const chosen = new Set(), bots = await api('GET', '/api/bots').catch(() => []);
   const name0 = top && top.name || ctx.art.title || '';
@@ -1897,8 +1953,9 @@ async function arcaStep2(m, ctx) {
       </div>
     </div>
     <div><p class="legend">받은 파일<span>${ctx.files.length ? '체크한 것만 들여요' : '없음 — 나중에 봇 페이지에서 올려도 돼요'}</span></p>
-      <div class="arl">${ctx.files.map((x, i) => `<label class="arr"><input type="checkbox" data-f="${i}"${x.on ? ' checked' : ''}><span class="dk k-${x.kind}">${h(KIND[x.kind] || x.kind)}</span>
-        <span class="dp">${h(x.file.name)} · ${size(x.file.size)}${x.card ? ' · ' + h(verSum(x.card.info)) : ''}</span><span class="ars">${h(x.from.label)}</span></label>`).join('')}</div></div>
+      ${dirs.map(d => `${dirs.length > 1 ? `<p class="arh">${d ? `${ic('folder', 14)}${h(d)} → <b>'${h(dirVer(d))}'</b> 버전으로 (지금 버전은 그대로)` : '바로 보이는 파일 → 위 <b>버전 이름</b>으로, 지금 버전'}</p>` : ''}
+      <div class="arl">${ctx.files.map((x, i) => x.dir !== d ? '' : `<label class="arr"><input type="checkbox" data-f="${i}"${x.on ? ' checked' : ''}><span class="dk k-${x.kind}">${h(KIND[x.kind] || x.kind)}</span>
+        <span class="dp">${h(x.file.name)} · ${size(x.file.size)}${x.card ? ' · ' + h(verSum(x.card.info)) : ''}</span><span class="ars">${h(x.from.label)}</span></label>`).join('')}</div>`).join('')}</div>
     ${ctx.hasText ? `<div class="row" style="gap:12px;align-items:center"><label class="tog" id="arIntroT" aria-pressed="true"><i></i>붙여넣은 글을 소개글로</label>
       <input class="inp" id="arTitle" placeholder="글 이름 (탭에 보여요)" value="${h(ctx.art.title)}" style="flex:1;min-width:180px;min-height:40px"></div>` : ''}
     <div class="prog" id="arProg" hidden><i></i></div>`;
@@ -1925,7 +1982,8 @@ async function arcaStep2(m, ctx) {
   if ($('#arIntroT', m)) $('#arIntroT', m).onclick = e => { introOn = !introOn; e.currentTarget.setAttribute('aria-pressed', introOn); $('#arTitle', m).disabled = !introOn; };
   $('#arOk', m).onclick = async () => {
     const btn = $('#arOk', m), note = $('#arNote', m), dest = $('#arDest', m).value;
-    const files = ctx.files.filter(x => x.on), main = (files.find(x => x.kind === 'card') || {}).card;
+    const files = ctx.files.filter(x => x.on), mainFiles = files.filter(x => x.dir === mainDir);
+    const main = (mainFiles.find(x => x.kind === 'card') || files.find(x => x.kind === 'card') || {}).card;
     btn.disabled = true;
     try {
       let bid;
@@ -1934,14 +1992,22 @@ async function arcaStep2(m, ctx) {
           folders: [...chosen], info: main ? main.info : {}, cover: cover || undefined});
         bid = b.id;
       } else bid = +dest;
+      // 폴더(예전 버전)는 먼저 따로 버전으로 만들고, 바로 보이는 파일 버전을 마지막에 지금 버전으로
+      const vids = new Map();
+      for (const d of dirs.filter(d => d !== mainDir)) {
+        const fs = files.filter(x => x.dir === d);
+        if (!fs.length) continue;
+        const c = (fs.find(x => x.kind === 'card') || {}).card;
+        vids.set(d, (await api('POST', '/api/versions', {bot_id: bid, name: dirVer(d), info: c ? c.info : {}, current: false})).id);
+      }
       let vid;
-      if (dest === 'new' || files.length) {
+      if (dest === 'new' || mainFiles.length || !vids.size) {
         vid = (await api('POST', '/api/versions', {bot_id: bid, name: $('#arVer', m).value.trim(), info: main ? main.info : {}, current: true})).id;
       }
       $('#arProg', m).hidden = false;
       for (const [i, x] of files.entries()) {
         note.textContent = `올리는 중 ${i + 1}/${files.length} · ${x.file.name}`;
-        await upload(x.file, {bot: bid, version: vid, kind: x.kind, name: x.file.name}, p => $('#arProg i', m).style.width = ((i + p) / files.length * 100) + '%');
+        await upload(x.file, {bot: bid, version: vids.get(x.dir) || vid, kind: x.kind, name: x.file.name}, p => $('#arProg i', m).style.width = ((i + p) / files.length * 100) + '%');
       }
       let miss = 0;
       if (introOn) {
