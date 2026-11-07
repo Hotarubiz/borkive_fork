@@ -678,6 +678,10 @@ img.emo{display:block;max-width:min(300px,100%);max-height:380px;width:auto;marg
 .pxf .dp{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--ink2)}
 .arh{display:flex;align-items:center;gap:6px;margin:10px 0 6px;font-size:13px;color:var(--ink3)}
 .hint.bad{color:var(--red)}
+.archk{display:flex;align-items:flex-start;gap:8px;padding:10px 12px;border-radius:12px;font-size:13.5px;line-height:1.5}
+.archk svg{flex:none;margin-top:2px}
+.archk.ok{background:var(--teal-bg);color:var(--teal-text)}
+.archk.warn{background:var(--red-bg);color:var(--red);border:1px solid var(--red-line)}
 .ars.bad{color:var(--red)}
 @media (max-width:700px){#addSub{display:none}.arr{grid-template-columns:auto auto minmax(0,1fr)}.arr.off{grid-template-columns:auto minmax(0,1fr)}.ars{grid-column:1/-1;white-space:normal}}
 .dierr p{margin:4px 0 0;font-size:12.5px;color:var(--mute)}
@@ -1844,8 +1848,14 @@ async function unzipBot(file) {
   for (const en of want) out.push(new File([await zipRead(file, en)], en.name.split('/').pop()));
   return out;
 }
-function arcaPane(m, pane) {
-  const art = {title: '', author: '', url: ''};
+// 봇 페이지 자료실 '게시글로 업데이트' — 아카 탭과 같은 흐름, 들일 곳은 이 봇의 새 버전
+function arcaUpdate() {
+  const m = modal(`<header><h2>게시글로 업데이트</h2><span>${h(B.name)} · 아카 글 속 링크에서 받아 새 버전으로</span>${xBtn}</header>
+    <div class="bd" id="addBody"><div class="apane" id="addPane"></div></div>`);
+  arcaPane(m, $('#addPane', m), B);
+}
+function arcaPane(m, pane, bot) {
+  const art = {title: '', author: '', url: '', date: ''};
   pane.innerHTML = `
     <div class="paste apaste" id="arPaste" contenteditable="true" data-ph="아카 글을 여기에 붙여넣기 (Ctrl+V)"></div>
     <p class="hint" style="margin:0">아카 글 화면에서 <b>Ctrl+A → Ctrl+C</b>로 통째로 복사해 붙여넣으면 본문만 골라요(접힌 곳까지는 <a class="bmk" id="arBmk" href="${h(BOOKMARKLET)}">📋 아카 본문 복사</a> 북마크로).
@@ -1914,7 +1924,7 @@ function arcaPane(m, pane) {
       e.preventDefault();
       box.focus();
       document.execCommand('selectAll'); document.execCommand('insertHTML', false, got.html);
-      Object.assign(art, {title: got.title, author: got.author, url: got.url});
+      Object.assign(art, {title: got.title, author: got.author, url: got.url, date: got.date});
     }
     setTimeout(draw);
   };
@@ -1956,16 +1966,37 @@ function arcaPane(m, pane) {
     if (errs && !sorted.length && !await confirmBox('못 받았어요', '링크에서 파일을 하나도 받지 못했어요. 글과 링크만으로 들일까요? 파일은 나중에 봇 페이지에서 올려도 돼요.')) {
       go.disabled = false; box.contentEditable = 'true'; $$('#arFound input', m).forEach(i => i.disabled = false); return;
     }
-    arcaStep2(m, {html: box.innerHTML.trim(), hasText: !!box.textContent.trim() || !!box.querySelector('img'), art, links, files: sorted});
+    arcaStep2(m, {html: box.innerHTML.trim(), hasText: !!box.textContent.trim() || !!box.querySelector('img'), art, links, files: sorted, bot});
   };
+}
+function updateCheck(b, ctx, top, mainDir) {
+  const vname = id => (b.versions.find(v => v.id === id) || {name: '공통 자료'}).name;
+  for (const x of ctx.files) {
+    const f = b.files.find(f => f.name === x.file.name && f.size === x.file.size);
+    if (f) { x.have = vname(f.version_id); x.on = false; }  // 이미 있는 파일은 빼 둠
+  }
+  const cv = top && top.info.version, cur = b.versions.find(v => v.current) || b.versions[0];
+  const same = cv && b.versions.find(v => (v.info && v.info.version) === cv || normName(v.name) === normName('v' + cv));
+  const main = ctx.files.filter(x => x.dir === mainDir), dup = main.filter(x => x.have).length;
+  const post = ctx.art.url && b.versions.find(v => v.intros.some(i => i.url === ctx.art.url));
+  const warn = [];
+  if (same) warn.push(`카드 버전 <b>v${h(cv)}</b>가 이미 <b>'${h(same.name)}'</b> 버전에 있어요`);
+  if (main.length && dup === main.length) warn.push('받은 파일이 모두 이미 서재에 있어요');
+  else if (dup) warn.push(`받은 파일 중 ${dup}개는 이미 있어서 빼 뒀어요`);
+  if (post) warn.push(`이 글은 이미 <b>'${h(post.name)}'</b> 버전 소개글로 보관돼 있어요`);
+  if (warn.length) return {ok: false, html: (same || (main.length && dup === main.length) ? '새 버전이 아닌 것 같아요 — ' : '') + warn.join(' · ')};
+  return {ok: true, html: `새 버전이에요${cv ? ` — 카드 <b>v${h(cv)}</b>` : ''}${cur ? ` (지금 버전: <b>'${h(cur.name)}'</b>${cur.info && cur.info.version ? ` · 카드 v${h(cur.info.version)}` : ''})` : ''}`};
 }
 async function arcaStep2(m, ctx) {
   const dirs = [...new Set(ctx.files.map(x => x.dir))].sort((a, b) => (a ? 1 : 0) - (b ? 1 : 0) || b.localeCompare(a, 'ko', {numeric: true}));
   const mainDir = dirs[0] || '', dirVer = d => d.split('/').pop();
   const cards = ctx.files.filter(x => x.kind === 'card').sort((a, b) => (a.dir === mainDir ? 0 : 1) - (b.dir === mainDir ? 0 : 1)), top = cards[0] && cards[0].card;
   let cover = top && top.cover || null, status = 'later';
-  const chosen = new Set(), bots = await api('GET', '/api/bots').catch(() => []);
-  const name0 = top && top.name || ctx.art.title || '';
+  const chosen = new Set(), bots = ctx.bot ? [ctx.bot] : await api('GET', '/api/bots').catch(() => []);
+  const name0 = ctx.bot ? ctx.bot.name : top && top.name || ctx.art.title || '';
+  // 카드에 버전 이름이 없으면 게시글 날짜로 (날짜를 못 찾으면 오늘)
+  const postDay = day(ctx.art.date || new Date().toISOString()), ver0 = top && top.info.version ? 'v' + top.info.version : postDay;
+  const chk = ctx.bot ? updateCheck(ctx.bot, ctx, top, mainDir) : null;
   $('#addBody', m).innerHTML = `
     <div class="addtop">
       <div style="display:flex;flex-direction:column;gap:8px">
@@ -1979,8 +2010,10 @@ async function arcaStep2(m, ctx) {
         </div>
         <div class="row" style="flex-wrap:nowrap;gap:12px">
           <label class="field" style="flex:2">들일 곳<select class="inp" id="arDest"></select></label>
-          <label class="field" style="flex:1">버전 이름<input class="inp" id="arVer" maxlength="40" value="${h(top && top.info.version ? 'v' + top.info.version : '')}" placeholder="비우면 알아서"></label>
+          <label class="field" style="flex:1">버전 이름<input class="inp" id="arVer" maxlength="40" value="${h(ver0)}" placeholder="비우면 알아서"></label>
         </div>
+        ${top && top.info.version ? '' : `<p class="hint" style="margin:-8px 0 0">카드에 버전 이름이 없어서 ${ctx.art.date ? '게시글 날짜' : '게시글 날짜를 못 찾아 오늘 날짜'}(${h(postDay)})로 붙였어요</p>`}
+        ${chk ? `<div class="archk ${chk.ok ? 'ok' : 'warn'}">${ic(chk.ok ? 'star' : 'info', 16)}<span>${chk.html}</span></div>` : ''}
         <div id="arNew">
           <p class="legend">어느 폴더에 꽂을까요?<span>여러 곳에 같이 넣을 수 있어요</span></p><div class="ftiles" id="arFolders"></div>
           <div class="field" style="margin-top:14px">지금 상태<div class="seg" id="arStatus">${Object.entries(STATUS).map(([k, v]) => `<button type="button" class="pill" data-s="${k}" aria-pressed="${k === status}">${v}</button>`).join('')}</div></div>
@@ -1990,19 +2023,21 @@ async function arcaStep2(m, ctx) {
     <div><p class="legend">받은 파일<span>${ctx.files.length ? '체크한 것만 들여요' : '없음 — 나중에 봇 페이지에서 올려도 돼요'}</span></p>
       ${dirs.map(d => `${dirs.length > 1 ? `<p class="arh">${d ? `${ic('folder', 14)}${h(d)} → <b>'${h(dirVer(d))}'</b> 버전으로 (지금 버전은 그대로)` : '바로 보이는 파일 → 위 <b>버전 이름</b>으로, 지금 버전'}</p>` : ''}
       <div class="arl">${ctx.files.map((x, i) => x.dir !== d ? '' : `<label class="arr"><input type="checkbox" data-f="${i}"${x.on ? ' checked' : ''}><span class="dk k-${x.kind}">${h(KIND[x.kind] || x.kind)}</span>
-        <span class="dp">${h(x.file.name)} · ${size(x.file.size)}${x.card ? ' · ' + h(verSum(x.card.info)) : ''}</span><span class="ars">${h(x.from.label)}</span></label>`).join('')}</div>`).join('')}</div>
+        <span class="dp">${h(x.file.name)} · ${size(x.file.size)}${x.card ? ' · ' + h(verSum(x.card.info)) : ''}</span><span class="ars">${x.have ? `이미 있음 · ${h(x.have)}` : h(x.from.label)}</span></label>`).join('')}</div>`).join('')}</div>
     ${ctx.hasText ? `<div class="row" style="gap:12px;align-items:center"><label class="tog" id="arIntroT" aria-pressed="true"><i></i>붙여넣은 글을 소개글로</label>
       <input class="inp" id="arTitle" placeholder="글 이름 (탭에 보여요)" value="${h(ctx.art.title)}" style="flex:1;min-width:180px;min-height:40px"></div>` : ''}
     <div class="prog" id="arProg" hidden><i></i></div>`;
-  m.querySelector('.dlg').insertAdjacentHTML('beforeend', `<footer><span class="note" id="arNote"></span><button class="btn" data-close>취소</button><button class="btn pri" id="arOk">서재에 꽂기</button></footer>`);
+  m.querySelector('.dlg').insertAdjacentHTML('beforeend', `<footer><span class="note" id="arNote"></span><button class="btn" data-close>취소</button><button class="btn pri" id="arOk">${ctx.bot ? '새 버전으로 넣기' : '서재에 꽂기'}</button></footer>`);
+  if (ctx.bot) $('#arName', m).closest('.row').hidden = true;
   $('footer [data-close]', m).onclick = m.close;
-  const drawCv = () => { $('#arCv', m).innerHTML = cover ? `<img src="${cover}" alt="">` : `<span class="ph">${h([...($('#arName', m).value || '?')][0])}</span>`; };
+  const drawCv = () => { $('#arCv', m).innerHTML = ctx.bot && ctx.bot.cover ? `<img src="/m/${h(ctx.bot.cover)}" alt="">` : cover ? `<img src="${cover}" alt="">` : `<span class="ph">${h([...($('#arName', m).value || '?')][0])}</span>`; };
   drawCv();
   $('#arCv', m).onclick = async () => { const [f] = await pick('image/*'); if (f) { cover = await shrink(f, 900); drawCv(); } };
   // 서재에 이름이 같은 봇이 있으면 그 봇에 새 버전으로 넣는 걸 먼저 권함
   const dests = () => {
     const n = normName($('#arName', m).value), same = n ? bots.filter(b => normName(b.name) === n) : [];
     const sel = $('#arDest', m), was = sel.value;
+    if (ctx.bot) { sel.innerHTML = `<option value="${ctx.bot.id}">${h(ctx.bot.name)}에 새 버전으로</option>`; sel.disabled = true; $('#arNew', m).hidden = true; return; }
     sel.innerHTML = `<option value="new">새 봇으로</option>${same.map(b => `<option value="${b.id}">서재의 ${h(b.name)}에 새 버전으로</option>`).join('')}`;
     sel.value = same.some(b => String(b.id) === was) ? was : same.length && was !== 'new' ? String(same[0].id) : 'new';
     $('#arNew', m).hidden = sel.value !== 'new';
@@ -2037,7 +2072,8 @@ async function arcaStep2(m, ctx) {
       }
       let vid;
       if (dest === 'new' || mainFiles.length || !vids.size) {
-        vid = (await api('POST', '/api/versions', {bot_id: bid, name: $('#arVer', m).value.trim(), info: main ? main.info : {}, current: true})).id;
+        vid = (await api('POST', '/api/versions', {bot_id: bid, name: $('#arVer', m).value.trim(), info: main ? main.info : {}, current: true,
+          released: ctx.art.date ? day(ctx.art.date) : ''})).id;
       }
       $('#arProg', m).hidden = false;
       for (const [i, x] of files.entries()) {
@@ -2062,7 +2098,7 @@ async function arcaStep2(m, ctx) {
       if (dest !== 'new' && !b.cover && cover) await api('PUT', `/api/bots/${bid}`, {cover}).catch(() => {});
       m.close();
       await loadState();
-      location.hash = `#/b/${bid}`;
+      if (ctx.bot) await viewBot(bid, 'files'); else location.hash = `#/b/${bid}`;
       toast(`${b.name}에 ${dest === 'new' ? '들였어요' : '새 버전으로 넣었어요'}${files.length ? ` — 파일 ${files.length}개` : ''}${miss ? ` · 소개글 그림 ${miss}개는 못 가져왔어요` : ''}`);
     } catch (e) { fail(e); btn.disabled = false; note.textContent = ''; }
   };
@@ -3206,7 +3242,9 @@ function pickArticle(raw) {
   const who = head && (head.querySelector('[data-filter]') || head.querySelector('.user-info'));
   const author = who ? (who.getAttribute('data-filter') || who.textContent).replace(/\s+/g, ' ').trim() : '';
   const link = [...doc.querySelectorAll('a[href]')].map(a => a.getAttribute('href')).find(u => /^https:\/\/arca\.live\/b\/[\w-]+\/\d+/.test(u || ''));
-  return {html: body.innerHTML, title: title.slice(0, 200), author: author.slice(0, 60), url: link ? link.split(/[?#]/)[0] : ''};
+  const tm = doc.querySelector('.article-head time[datetime], .article-info time[datetime]');
+  const date = tm && !isNaN(Date.parse(tm.getAttribute('datetime'))) ? tm.getAttribute('datetime') : '';
+  return {html: body.innerHTML, title: title.slice(0, 200), author: author.slice(0, 60), url: link ? link.split(/[?#]/)[0] : '', date};
 }
 
 // 채팅 로그 탭
@@ -3563,7 +3601,8 @@ function tabFiles() {
   const groups = Object.keys(KIND).map(k => [k, common.filter(f => f.kind === k)]).filter(g => g[1].length);
   const order = f => (f.kind === 'card' ? 0 : 1);
   el.innerHTML = `<div class="toolbar" style="margin-bottom:12px"><h2>버전</h2><span class="meta">업데이트마다 카드·모듈·소개글을 한 묶음으로</span>
-      <button class="btn sm pri" id="vNew" style="margin-left:auto">${ic('plus', 16)}새 버전 올리기</button></div>
+      <button class="btn sm" id="vArca" style="margin-left:auto" title="아카 글을 붙여넣으면 글 속 링크에서 파일을 받아 새 버전으로">${ic('link', 16)}게시글로 업데이트</button>
+      <button class="btn sm pri" id="vNew">${ic('plus', 16)}새 버전 올리기</button></div>
     ${B.versions.map((v, i) => {
       const fs = verFiles(v.id).sort((a, b) => order(a) - order(b));
       const open = v.current || (i === 0 && !B.versions.some(x => x.current));
@@ -3587,6 +3626,7 @@ function tabFiles() {
   const after = () => viewBot(B.id, 'files');
   bindFiles(el, B.files, after);
   $('#vNew').onclick = () => verDialog();
+  $('#vArca').onclick = () => arcaUpdate();
   if ($('#vFirst')) { $('#vFirst').onclick = () => verDialog(); dropZone($('#vFirst'), () => verDialog()); }
   $$('.ver', el).forEach(sec => {
     const v = B.versions.find(x => x.id === +sec.dataset.v);
