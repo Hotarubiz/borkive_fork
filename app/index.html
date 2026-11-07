@@ -111,6 +111,7 @@ button{cursor:pointer}
 .fdr{display:flex;align-items:center;gap:10px;padding:8px 10px 8px 12px;border:1px solid var(--line2);border-radius:12px;background:var(--card2);cursor:grab;user-select:none}
 .fdr.dragging{opacity:.5;border-style:dashed}
 .fdr b{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:600}
+.fdr b .meta{margin-left:8px;font-weight:400}
 .fdr .dot{width:10px;height:10px;border-radius:4px;flex:none}
 .fgrip{color:var(--mute);letter-spacing:-2px;font-size:13px}
 .fdr [data-mv] svg{transform:rotate(90deg)}
@@ -1375,16 +1376,16 @@ function labelDialog(t, after) {
 }
 
 // ---- 폴더 만들기·고치기 ----
-// 폴더 순서: 끌어다 놓거나 ↑↓ (봇·자료함·그림체 폴더는 칸마다 따로)
-function folderOrder(scope) {
-  let list = S.state.folders.filter(f => (f.scope || 'bot') === scope);
-  const m = modal(`<header><h2>폴더 순서</h2><span>${{bot: '서재', item: '자료함', style: '그림체'}[scope]} 폴더</span>${xBtn}</header>
-    <div class="bd"><div class="ford" id="ford"></div></div>
+// 순서 바꾸기 창: 끌어다 놓거나 ↑↓ — items [{id, name, color?, meta?}], save(ids 위→아래), sorter(list → 새 list)면 '정렬' 단추
+function orderDialog({title, sub, items, save, sorter, sortLabel}) {
+  let list = [...items];
+  const m = modal(`<header><h2>${title}</h2><span>${sub}</span>${xBtn}</header>
+    <div class="bd">${sorter ? `<button class="btn sm ghost" id="ordSort" style="align-self:flex-start">${ic('order', 14)}${sortLabel}</button>` : ''}<div class="ford" id="ford"></div></div>
     <footer><span class="note">끌어다 놓거나 화살표로 옮겨요</span><button class="btn" data-close>취소</button><button class="btn pri" data-ok>저장</button></footer>`, 'narrow');
   let drag = null;
   const draw = () => {
-    $('#ford', m).innerHTML = list.map((f, i) => `<div class="fdr" draggable="true" data-i="${i}"><span class="fgrip" aria-hidden="true">⋮⋮</span><span class="dot" style="background:${f.color}"></span>
-      <b>${h(f.name)}</b><button class="ib" data-mv="-1" aria-label="위로"${i ? '' : ' disabled'}>${ic('back', 15)}</button><button class="ib dn" data-mv="1" aria-label="아래로"${i < list.length - 1 ? '' : ' disabled'}>${ic('back', 15)}</button></div>`).join('');
+    $('#ford', m).innerHTML = list.map((f, i) => `<div class="fdr" draggable="true" data-i="${i}"><span class="fgrip" aria-hidden="true">⋮⋮</span>${f.color ? `<span class="dot" style="background:${f.color}"></span>` : ''}
+      <b>${h(f.name)}${f.meta ? `<span class="meta">${h(f.meta)}</span>` : ''}</b><button class="ib" data-mv="-1" aria-label="위로"${i ? '' : ' disabled'}>${ic('back', 15)}</button><button class="ib dn" data-mv="1" aria-label="아래로"${i < list.length - 1 ? '' : ' disabled'}>${ic('back', 15)}</button></div>`).join('');
     $$('.fdr', m).forEach(el => {
       const i = +el.dataset.i;
       $$('[data-mv]', el).forEach(b => b.onclick = () => { const j = i + +b.dataset.mv; [list[i], list[j]] = [list[j], list[i]]; draw(); $(`.fdr[data-i="${j}"] [data-mv="${b.dataset.mv}"]`, m)?.focus(); });
@@ -1394,9 +1395,20 @@ function folderOrder(scope) {
     });
   };
   draw();
-  $('[data-ok]', m).onclick = async () => {
-    try { await api('PUT', '/api/folders/order', {ids: list.map(f => f.id)}); m.close(); await loadState(); route(); toast('폴더 순서를 바꿨어요'); } catch (e) { fail(e); }
-  };
+  if (sorter) $('#ordSort', m).onclick = () => { list = sorter(list); draw(); };
+  $('[data-ok]', m).onclick = async () => { try { await save(list.map(f => f.id)); m.close(); } catch (e) { fail(e); } };
+}
+// 폴더 순서 (봇·자료함·그림체 폴더는 칸마다 따로)
+function folderOrder(scope) {
+  orderDialog({title: '폴더 순서', sub: `${{bot: '서재', item: '자료함', style: '그림체'}[scope]} 폴더`, items: S.state.folders.filter(f => (f.scope || 'bot') === scope),
+    save: async ids => { await api('PUT', '/api/folders/order', {ids}); await loadState(); route(); toast('폴더 순서를 바꿨어요'); }});
+}
+// 버전 순서 (위가 새것) — 버전 번호순 정렬 단추: 카드 버전, 없으면 이름의 숫자로
+function versionOrder() {
+  const key = v => (v.info && v.info.version) || v.name || '';
+  orderDialog({title: '버전 순서', sub: B.name, items: B.versions.map(v => ({id: v.id, name: v.name, meta: [v.current && '지금', v.released || day(v.created)].filter(Boolean).join(' · '), v})),
+    sortLabel: '버전 번호순으로 (큰 것 위로)', sorter: l => [...l].sort((a, b) => key(b.v).localeCompare(key(a.v), 'ko', {numeric: true})),
+    save: async ids => { B = (await api('PUT', `/api/bots/${B.id}/versions/order`, {ids})).bot; drawBot('files'); toast('버전 순서를 바꿨어요'); }});
 }
 function folderDialog(f, scope = 'bot') {
   if (f) scope = f.scope || 'bot';
@@ -3601,7 +3613,8 @@ function tabFiles() {
   const groups = Object.keys(KIND).map(k => [k, common.filter(f => f.kind === k)]).filter(g => g[1].length);
   const order = f => (f.kind === 'card' ? 0 : 1);
   el.innerHTML = `<div class="toolbar" style="margin-bottom:12px"><h2>버전</h2><span class="meta">업데이트마다 카드·모듈·소개글을 한 묶음으로</span>
-      <button class="btn sm" id="vArca" style="margin-left:auto" title="아카 글을 붙여넣으면 글 속 링크에서 파일을 받아 새 버전으로">${ic('link', 16)}게시글로 업데이트</button>
+      ${B.versions.length > 1 ? `<button class="btn sm ghost" id="vOrd" style="margin-left:auto" title="버전 순서 바꾸기">${ic('order', 16)}순서</button>` : ''}
+      <button class="btn sm" id="vArca"${B.versions.length > 1 ? '' : ' style="margin-left:auto"'} title="아카 글을 붙여넣으면 글 속 링크에서 파일을 받아 새 버전으로">${ic('link', 16)}게시글로 업데이트</button>
       <button class="btn sm pri" id="vNew">${ic('plus', 16)}새 버전 올리기</button></div>
     ${B.versions.map((v, i) => {
       const fs = verFiles(v.id).sort((a, b) => order(a) - order(b));
@@ -3627,6 +3640,7 @@ function tabFiles() {
   bindFiles(el, B.files, after);
   $('#vNew').onclick = () => verDialog();
   $('#vArca').onclick = () => arcaUpdate();
+  if ($('#vOrd')) $('#vOrd').onclick = () => versionOrder();
   if ($('#vFirst')) { $('#vFirst').onclick = () => verDialog(); dropZone($('#vFirst'), () => verDialog()); }
   $$('.ver', el).forEach(sec => {
     const v = B.versions.find(x => x.id === +sec.dataset.v);

@@ -30,6 +30,7 @@ API (JSON):
   POST   /api/bots/<id>/basic            {html, scope: all|ver, version_id} 기본 소개(모든 버전 공통 또는 그 버전 전용, 빈 글이면 지움)
   POST   /api/bots/<id>/intro/fetch      {url, version_id?} 아카라이브 글 가져오기
   POST   /api/versions {bot_id, name, note, released, info, current}   PUT|DELETE /api/versions/<id>
+  PUT    /api/bots/<id>/versions/order {ids: [위 → 아래]}   버전 순서 (새 버전은 맨 위로)
          버전 = 업데이트 하나(카드·모듈·소개글 묶음). 버전 없는 봇 자료는 공통 자료.
   PUT    /api/folders/order {ids}        폴더 순서 (보낸 순서대로)
   POST   /api/folders  PUT|DELETE /api/folders/<id>      POST /api/shelves  PUT|DELETE /api/shelves/<id>
@@ -308,6 +309,8 @@ class DB:
                 self.c.execute("INSERT INTO statuses(key, name, color, sort, builtin) VALUES (?,?,?,?,1)", (k, n, col, i))
             if self.c.execute("SELECT 1 FROM bots WHERE status='archived' LIMIT 1").fetchone():  # 예전 '보관'에 둔 봇이 있으면 더한 상태로 남김
                 self.c.execute("INSERT INTO statuses(key, name, color, sort) VALUES ('archived','보관','#C7C5CC',3)")
+        if "sort" not in [r["name"] for r in self.c.execute("PRAGMA table_info(versions)")]:  # 버전 순서 (0 = 직접 안 정함 → 넣은 때 순서)
+            self.c.execute("ALTER TABLE versions ADD COLUMN sort INTEGER DEFAULT 0")
         if "inbox" not in [r["name"] for r in self.c.execute("PRAGMA table_info(bots)")]:  # 정리 전 (폴더째 들인 뒤 아직 분류 안 한 봇)
             self.c.execute("ALTER TABLE bots ADD COLUMN inbox INTEGER DEFAULT 0")
         if "itype" not in [r["name"] for r in self.c.execute("PRAGMA table_info(bots)")]:  # 자료함 자료 (''이면 봇)
@@ -694,7 +697,7 @@ def info_text(bid, vdir=None, fnames=None):
         lines += ["", "메모", b["memo"].strip()]
     files = db.q("SELECT id, name, path, version_id FROM files WHERE bot_id=? ORDER BY created, id", (bid,))
     fname = lambda f: fnames.get(f["id"], f["name"]) if fnames else f["path"].rsplit("/", 1)[-1] if f["path"] else (f["name"] or "file")
-    vers = db.q("SELECT id, name, released, current FROM versions WHERE bot_id=? ORDER BY created, id", (bid,))
+    vers = db.q("SELECT id, name, released, current FROM versions WHERE bot_id=? ORDER BY sort, created, id", (bid,))
     if vers:
         lines += ["", "버전"]
     for v in vers:
@@ -1579,10 +1582,10 @@ def export_zip(out):
                 fnames[f["id"]] = arc.rsplit("/", 1)[1]
                 return {"kind": f["kind"], "name": f["name"], "note": f["note"], "file": fnames[f["id"]]}
 
-            for i, v in enumerate(db.q("SELECT * FROM versions WHERE bot_id=? ORDER BY created, id", (b["id"],)), 1):
+            for i, v in enumerate(db.q("SELECT * FROM versions WHERE bot_id=? ORDER BY sort, created, id", (b["id"],)), 1):
                 d = slot(bdir, v["name"] or f"버전 {i}")
                 vdir[v["id"]] = d.rsplit("/", 1)[1]
-                mv = {k: v[k] for k in ("name", "note", "released", "current", "created")} | {"dir": vdir[v["id"]], "info": v["info"], "files": [], "intros": []}
+                mv = {k: v[k] for k in ("name", "note", "released", "current", "created", "sort")} | {"dir": vdir[v["id"]], "info": v["info"], "files": [], "intros": []}
                 mv["files"] = [put(d, f) for f in files if f["version_id"] == v["id"]]
                 if (v["basic"] or "").strip():  # 이 버전 전용 기본 소개
                     mv["basic"] = intro(d, "기본 소개", v["basic"])
@@ -1948,10 +1951,10 @@ def _import_zip(z, job, made):
             if not isinstance(mv, dict):
                 continue
             d = f"{bdir}/{mv.get('dir')}"
-            vid, _ = db.x("INSERT INTO versions(bot_id, name, note, released, current, info, basic, created) VALUES (?,?,?,?,0,?,?,?)",
+            vid, _ = db.x("INSERT INTO versions(bot_id, name, note, released, current, info, basic, created, sort) VALUES (?,?,?,?,0,?,?,?,?)",
                           (bid, txt(mv.get("name"), 40), txt(mv.get("note"), 4000), txt(mv.get("released"), 20),
                            json.dumps(mv.get("info") if isinstance(mv.get("info"), dict) else {}, ensure_ascii=False)[:400_000],
-                           intro(d, mv.get("basic")), when(mv.get("created"))))
+                           intro(d, mv.get("basic")), when(mv.get("created")), mv.get("sort") if isinstance(mv.get("sort"), int) else 0))
             if mv.get("current") and not cur:
                 cur = vid
             for mf in lst(mv.get("files")):
@@ -2095,7 +2098,7 @@ def bot_detail(id):
     b["folders"] = folders_of([id]).get(id, [])
     b["links"] = db.q("SELECT * FROM links WHERE bot_id=? ORDER BY sort, id", (id,))
     b["files"] = db.q("SELECT * FROM files WHERE bot_id=? ORDER BY created DESC", (id,))
-    b["versions"] = db.q("SELECT * FROM versions WHERE bot_id=? ORDER BY created DESC, id DESC", (id,))
+    b["versions"] = db.q("SELECT * FROM versions WHERE bot_id=? ORDER BY sort DESC, created DESC, id DESC", (id,))
     ins = db.q("""SELECT i.* FROM intros i JOIN versions v ON v.id=i.version_id WHERE v.bot_id=? ORDER BY i.sort, i.id""", (id,))
     for v in b["versions"]:
         v["intros"] = [i for i in ins if i["version_id"] == v["id"]]
@@ -2150,8 +2153,9 @@ def new_version(bot_id, name="", note="", released="", info=None, current=True):
         ver = str((info or {}).get("version") or "").strip()
         n = db.q("SELECT COUNT(*) AS n FROM versions WHERE bot_id=?", (bot_id,))[0]["n"]
         name = f"v{ver}" if ver else ("첫 버전" if not n else "{0.year}. {0.month}. {0.day}. 버전".format(datetime.now(KST)))
-    vid, _ = db.x("INSERT INTO versions(bot_id, name, note, released, info, created) VALUES (?,?,?,?,?,?)",
-                  (bot_id, name[:40], note[:4000], released[:20], json.dumps(info or {}, ensure_ascii=False)[:400_000], now()))
+    top = db.q("SELECT MAX(sort) AS n FROM versions WHERE bot_id=?", (bot_id,))[0]["n"] or 0
+    vid, _ = db.x("INSERT INTO versions(bot_id, name, note, released, info, created, sort) VALUES (?,?,?,?,?,?,?)",
+                  (bot_id, name[:40], note[:4000], released[:20], json.dumps(info or {}, ensure_ascii=False)[:400_000], now(), top + 1 if top else 0))
     if current or not db.q("SELECT 1 FROM versions WHERE bot_id=? AND current=1", (bot_id,)):
         set_current(vid)
     return vid
@@ -3540,6 +3544,12 @@ class Handler(BaseHTTPRequestHandler):
                 if vals:
                     db.x(f"UPDATE {p[0]} SET {', '.join(k + '=?' for k in vals)} WHERE key=?", (*vals.values(), p[1]))
                 return self.send(200, {"ok": True, "state": state()})
+            if p and len(p) == 4 and p[0] == "bots" and p[1].isdigit() and p[2:] == ["versions", "order"]:  # {ids: [위 → 아래]}
+                bid = int(p[1])
+                mine = {r["id"] for r in db.q("SELECT id FROM versions WHERE bot_id=?", (bid,))}
+                ids = [i for i in d.get("ids") or [] if i in mine]
+                db.many("UPDATE versions SET sort=? WHERE id=?", [(len(ids) - n, i) for n, i in enumerate(ids)])
+                return self.send(200, {"ok": True, "bot": bot_detail(bid)})
             if p == ["folders", "order"]:  # {ids: [폴더 id…]} 이 순서대로 (한 칸 안에서)
                 ids = [i for i in d.get("ids") or [] if isinstance(i, int)]
                 db.many("UPDATE folders SET sort=? WHERE id=?", [(n, i) for n, i in enumerate(ids, 1)])
