@@ -2620,8 +2620,11 @@ class Handler(BaseHTTPRequestHandler):
             self.close_connection = True
             self.send_header("Connection", "close")
         self.end_headers()
-        while chunk := r.read(1 << 20):
-            self.wfile.write(chunk)
+        try:
+            while chunk := r.read(1 << 20):
+                self.wfile.write(chunk)
+        except (BrokenPipeError, ConnectionResetError):  # 받다가 창을 닫음
+            self.close_connection = True
 
     def relay_proton(self, d):
         """프로톤 드라이브 공개 링크 — 브라우저의 프로톤 SDK(app/proton.js)가 만든 요청을 프로톤 주소로만 대신 보내고 답을 그대로 넘김."""
@@ -2658,8 +2661,11 @@ class Handler(BaseHTTPRequestHandler):
                 self.close_connection = True
                 self.send_header("Connection", "close")
             self.end_headers()
-            while chunk := r.read(1 << 20):
-                self.wfile.write(chunk)
+            try:
+                while chunk := r.read(1 << 20):
+                    self.wfile.write(chunk)
+            except (BrokenPipeError, ConnectionResetError):  # 브라우저가 먼저 끊음 (SDK가 그만둔 요청)
+                self.close_connection = True
 
     def mega_info(self, fid):
         """메가 공개 파일 링크 → {g: 받을 주소(https), s: 크기, at: 암호화된 이름}. 푸는 열쇠(링크 # 뒤)는 서버로 안 옴 — 브라우저가 풂."""

@@ -2022,7 +2022,7 @@ async function arcaStep2(m, ctx) {
     </div>
     <div><p class="legend">받은 파일<span>${ctx.files.length ? '체크한 것만 들여요' : '없음 — 나중에 봇 페이지에서 올려도 돼요'}</span></p>
       ${dirs.map(d => `${dirs.length > 1 ? `<p class="arh">${d ? `${ic('folder', 14)}${h(d)} → <b>'${h(dirVer(d))}'</b> 버전으로 (지금 버전은 그대로)` : '바로 보이는 파일 → 위 <b>버전 이름</b>으로, 지금 버전'}</p>` : ''}
-      <div class="arl">${ctx.files.map((x, i) => x.dir !== d ? '' : `<label class="arr"><input type="checkbox" data-f="${i}"${x.on ? ' checked' : ''}><span class="dk k-${x.kind}">${h(KIND[x.kind] || x.kind)}</span>
+      <div class="arl">${ctx.files.map((x, i) => x.dir !== d ? '' : `<label class="arr"><input type="checkbox" data-af="${i}"${x.on ? ' checked' : ''}><span class="dk k-${x.kind}">${h(KIND[x.kind] || x.kind)}</span>
         <span class="dp">${h(x.file.name)} · ${size(x.file.size)}${x.card ? ' · ' + h(verSum(x.card.info)) : ''}</span><span class="ars">${x.have ? `이미 있음 · ${h(x.have)}` : h(x.from.label)}</span></label>`).join('')}</div>`).join('')}</div>
     ${ctx.hasText ? `<div class="row" style="gap:12px;align-items:center"><label class="tog" id="arIntroT" aria-pressed="true"><i></i>붙여넣은 글을 소개글로</label>
       <input class="inp" id="arTitle" placeholder="글 이름 (탭에 보여요)" value="${h(ctx.art.title)}" style="flex:1;min-width:180px;min-height:40px"></div>` : ''}
@@ -2047,7 +2047,7 @@ async function arcaStep2(m, ctx) {
   $('#arDest', m).onchange = () => { $('#arNew', m).hidden = $('#arDest', m).value !== 'new'; };
   folderTiles($('#arFolders', m), chosen);
   $$('#arStatus .pill', m).forEach(b => b.onclick = () => { status = b.dataset.s; $$('#arStatus .pill', m).forEach(x => x.setAttribute('aria-pressed', x === b)); });
-  $$('[data-f]', m).forEach(c => c.onchange = () => { ctx.files[+c.dataset.f].on = c.checked; });
+  $$('[data-af]', m).forEach(c => c.onchange = () => { ctx.files[+c.dataset.af].on = c.checked; });  // data-f는 폴더 칸이 씀
   let introOn = ctx.hasText;
   if ($('#arIntroT', m)) $('#arIntroT', m).onclick = e => { introOn = !introOn; e.currentTarget.setAttribute('aria-pressed', introOn); $('#arTitle', m).disabled = !introOn; };
   $('#arOk', m).onclick = async () => {
