@@ -16,6 +16,8 @@ API (JSON):
   POST   /api/bots/<id>/intro            {html, version_id?, intro_id?, title?, url?, author?} 붙여넣은 소개글을 그 버전(기본 지금 버전)에
                                          새 글로 저장, intro_id가 있으면 그 글을 바꿈(그림은 받아서 보관)
   PUT    /api/intros/<id>                {title} 글 이름   DELETE /api/intros/<id>
+  POST   /api/articles                   {owner: pgroup|style, owner_id, article_id?, html, title?, url?, author?} 페르소나 폴더·그림체에 붙여넣은 아카 글
+                                         (article_id면 그 글을 바꿈)   PUT /api/articles/<id> {title}   DELETE /api/articles/<id>
   PUT    /api/series                     {bot_id, name, ids?: [채팅 id], from?: 예전 시리즈 이름} 채팅을 시리즈로 묶기·이름 바꾸기·풀기(name '')
   GET    /api/files/<id>/lore            카드·모듈 파일 속 로어북 {sources: [{label, entries}]} (charx 속 module.risum, .risum까지)
   GET    /api/files/<id>/assets          파일 속 에셋 목록 {sources: [{label, kind c|m, assets}]}
@@ -198,6 +200,9 @@ CREATE TABLE IF NOT EXISTS intros (
   id INTEGER PRIMARY KEY AUTOINCREMENT, version_id INTEGER REFERENCES versions(id) ON DELETE CASCADE,
   title TEXT DEFAULT '', html TEXT DEFAULT '', url TEXT DEFAULT '', author TEXT DEFAULT '', at TEXT, sort INTEGER DEFAULT 0);
 CREATE INDEX IF NOT EXISTS intros_ver ON intros(version_id);
+CREATE TABLE IF NOT EXISTS articles (id INTEGER PRIMARY KEY AUTOINCREMENT, owner TEXT NOT NULL, owner_id INTEGER NOT NULL,
+  title TEXT DEFAULT '', html TEXT DEFAULT '', url TEXT DEFAULT '', author TEXT DEFAULT '', at TEXT, sort INTEGER DEFAULT 0);
+CREATE INDEX IF NOT EXISTS articles_owner ON articles(owner, owner_id);
 CREATE TABLE IF NOT EXISTS personas (
   id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, image TEXT, prompt TEXT DEFAULT '', memo TEXT DEFAULT '',
   module TEXT, module_name TEXT, module_size INTEGER, created TEXT, updated TEXT, opened TEXT);
@@ -461,6 +466,39 @@ def save_data_url(data_url):
     name = f"{secrets.token_hex(10)}.{ {'jpeg': 'jpg'}.get(m.group(1), m.group(1))}"
     (MEDIA / name).write_bytes(raw)
     return name
+
+
+def gc_intro(old_html):
+    """예전 소개글에만 있던 그림 파일 정리 (다른 소개글·아카 글·표지·장면이 쓰면 남김)."""
+    for n in set(intro_media(old_html)):
+        like = f"%/m/{n}%"
+        used = db.q("""SELECT 1 FROM bots WHERE intro_html LIKE ? OR basic LIKE ? OR cover=?
+                       UNION SELECT 1 FROM versions WHERE intro_html LIKE ? OR basic LIKE ?
+                       UNION SELECT 1 FROM intros WHERE html LIKE ? UNION SELECT 1 FROM articles WHERE html LIKE ?
+                       UNION SELECT 1 FROM marks WHERE image=? UNION SELECT 1 FROM bimages WHERE image=? LIMIT 1""",
+                    (like, like, n, like, like, like, like, n, n))
+        if not used:
+            drop_media(n)
+
+
+# ---- 아카 글: 페르소나 폴더·그림체에 붙이는 글 (봇은 버전마다 intros) ----
+ARTICLE_OWNERS = {"pgroup": "pgroups", "style": "styles"}
+
+
+def article_rows(owner, oid):
+    return db.q("SELECT id, title, html, url, author, at FROM articles WHERE owner=? AND owner_id=? ORDER BY sort, id", (owner, oid))
+
+
+def drop_articles(owner, oid):
+    old = "".join(r["html"] or "" for r in db.q("SELECT html FROM articles WHERE owner=? AND owner_id=?", (owner, oid)))
+    db.x("DELETE FROM articles WHERE owner=? AND owner_id=?", (owner, oid))
+    gc_intro(old)
+
+
+def add_article(owner, oid, title, html, url, author, at):
+    n = db.q("SELECT COALESCE(MAX(sort), 0) + 1 AS n FROM articles WHERE owner=? AND owner_id=?", (owner, oid))[0]["n"]
+    return db.x("INSERT INTO articles(owner, owner_id, title, html, url, author, at, sort) VALUES (?,?,?,?,?,?,?,?)",
+                (owner, oid, title[:300], html, url[:300], author[:100], at, n))[0]
 
 
 def drop_media(*names):
@@ -1078,6 +1116,7 @@ def style_detail(id):
     except ValueError:
         s["chars"] = []
     s["images"] = db.q("SELECT id, image, meta, variant_id FROM style_images WHERE style_id=? ORDER BY sort, id", (id,))
+    s["articles"] = article_rows("style", id)
     s["variants"] = db.q("SELECT id, label, prompt, negative, chars, settings, memo, created FROM style_variants WHERE style_id=? ORDER BY sort, id", (id,))
     s["gallery"] = db.q("SELECT id, variant_id, image, memo, meta, created FROM sgallery WHERE style_id=? ORDER BY id DESC", (id,))
     for i in s["images"] + s["gallery"]:
@@ -1292,6 +1331,7 @@ def pgroup_detail(gid):
     g["versions"] = [persona_detail(r["id"]) for r in db.q("SELECT id FROM personas WHERE group_id=? ORDER BY sort, id", (gid,))]
     g["images"] = pimage_rows(gid)
     g["files"] = pfile_rows(gid)
+    g["articles"] = article_rows("pgroup", gid)
     return g
 
 
@@ -1379,6 +1419,7 @@ def pgroup_prune(gid):
         imgs = [r["image"] for r in db.q("SELECT image FROM pimages WHERE group_id=?", (gid,))]
         db.x("DELETE FROM pimages WHERE group_id=?", (gid,))
         drop_pfiles("group_id=?", gid)
+        drop_articles("pgroup", gid)
         db.x("DELETE FROM pgroups WHERE id=?", (gid,))
         drop_media(*imgs)
 
@@ -1593,7 +1634,9 @@ def export_zip(out):
                 return arc[len(sdir) + 1:]
             text(f"{sdir}/{safe_name(s['name'] or '그림체')}.botkive-style.json", json.dumps(style_export([s["id"]], gal), ensure_ascii=False))
             linked = db.q("SELECT b.name, x.role FROM bot_styles x JOIN bots b ON b.id=x.bot_id WHERE x.style_id=?", (s["id"],))
-            manifest["styles"].append({"name": s["name"], "dir": sdir[len(root) + 1:], "folders": [folders[i]["name"] for i in s["folders"] if i in folders], "bots": linked})
+            manifest["styles"].append({"name": s["name"], "dir": sdir[len(root) + 1:], "folders": [folders[i]["name"] for i in s["folders"] if i in folders], "bots": linked,
+                                       "articles": [{k: a[k] for k in ("title", "url", "author", "at")} | {"dir": f"{sdir}/아카 글"[len(root) + 1:], "file": intro(f"{sdir}/아카 글", a["title"], a["html"])}
+                                                    for a in article_rows("style", s["id"])]})
 
         manifest["pgroups"] = [{k: g[k] for k in ("id", "name", "ptype", "created")} for g in db.q("SELECT * FROM pgroups ORDER BY id")]
         gtype = {g["id"]: g["ptype"] for g in manifest["pgroups"]}
@@ -1628,6 +1671,10 @@ def export_zip(out):
                     arc = slot(f"{gdirs[g['id']]}/갤러리", f"{len(g['images']) + 1:03d}.{r['image'].rsplit('.', 1)[1]}")
                     z.write(f, arc, compress_type=zipfile.ZIP_STORED)
                     g["images"].append({"file": arc[len(root) + 1:], "persona": r["persona_id"], "memo": r["memo"] or "", "created": r["created"]})
+            g["articles"] = []  # 아카 글: 폴더 아래 '아카 글'
+            if g["id"] in gdirs:
+                g["articles"] = [{k: a[k] for k in ("title", "url", "author", "at")} | {"dir": f"{gdirs[g['id']]}/아카 글"[len(root) + 1:], "file": intro(f"{gdirs[g['id']]}/아카 글", a["title"], a["html"])}
+                                 for a in article_rows("pgroup", g["id"])]
             g["files"] = []  # 폴더 공통 자료
             for f in db.q("SELECT * FROM pfiles WHERE group_id=? AND persona_id IS NULL ORDER BY id", (g["id"],)):
                 if g["id"] in gdirs and (DATA / f["path"]).is_file():
@@ -1741,6 +1788,11 @@ def _import_zip(z, job, made):
         c.feed(body)
         return c.result().strip()[:3_000_000]
 
+    def add_articles(owner, oid, lst_):
+        for a in lst(lst_):
+            if isinstance(a, dict) and (html := intro(txt(a.get("dir"), 2000), txt(a.get("file"), 300))):
+                add_article(owner, oid, txt(a.get("title"), 300), html, txt(a.get("url"), 300), txt(a.get("author"), 100), when(a.get("at")))
+
     labels = {}
 
     def label(t, key, fallback):
@@ -1829,6 +1881,7 @@ def _import_zip(z, job, made):
         gid = gmap.get(g.get("id")) if isinstance(g, dict) else None
         if gid not in made["pgroups"]:
             continue
+        add_articles("pgroup", gid, g.get("articles"))
         for im in lst(g.get("images")):
             if isinstance(im, dict) and (name := media(txt(im.get("file"), 2000))):
                 pid = persona_of(im.get("persona"))
@@ -1966,6 +2019,8 @@ def _import_zip(z, job, made):
             out["failed_styles"].append(txt(ms.get("name"), 200))
             continue
         made["styles"] += ids
+        if ids:
+            add_articles("style", ids[0], ms.get("articles"))
         for sid in ids:
             db.many("INSERT OR IGNORE INTO style_folders(style_id, folder_id) VALUES (?,?)",
                     [(sid, fids["style", n]) for n in map(lambda x: txt(x, 20), lst(ms.get("folders"))) if ("style", n) in fids])
@@ -3035,6 +3090,22 @@ class Handler(BaseHTTPRequestHandler):
                 return
             if p == ["proton"]:
                 return self.relay_proton(d)
+            if p == ["articles"]:  # {owner: pgroup|style, owner_id, article_id?, html, title, url, author} 붙여넣은 아카 글
+                owner, oid, aid = d.get("owner"), d.get("owner_id"), d.get("article_id")
+                table = ARTICLE_OWNERS.get(owner)
+                if not table or not isinstance(oid, int) or not db.q(f"SELECT 1 FROM {table} WHERE id=?", (oid,)):
+                    return self.send(404, {"error": "글을 붙일 곳이 없어요"})
+                url, title, author = str(d.get("url") or "")[:300], str(d.get("title") or ""), str(d.get("author") or "")
+                html, ok, miss = clean_intro(str(d.get("html") or ""), url)
+                old = db.q("SELECT * FROM articles WHERE id=? AND owner=? AND owner_id=?", (aid, owner, oid)) if isinstance(aid, int) else []
+                if old:  # 그 글을 새로 넣기
+                    aid = old[0]["id"]
+                    db.x("UPDATE articles SET title=?, html=?, url=?, author=?, at=? WHERE id=?", (title[:300] or old[0]["title"], html, url, author[:100], now(), aid))
+                    gc_intro(old[0]["html"])
+                else:
+                    aid = add_article(owner, oid, title, html, url, author, now())
+                db.x(f"UPDATE {table} SET updated=? WHERE id=?", (now(), oid))
+                return self.send(200, {"ok": True, "id": aid, "got": ok, "miss": miss, "articles": article_rows(owner, oid)})
             if p == ["styles"]:
                 return self.send(200, style_detail(new_style(d)))
             if len(p) == 3 and p[0] == "bots" and p[1].isdigit() and p[2] == "images":  # {image(data URL), chat_id, idx, memo}
@@ -3250,15 +3321,7 @@ class Handler(BaseHTTPRequestHandler):
             self.send(500, {"error": repr(e)})
 
     def gc_intro(self, old_html):
-        """예전 소개글에만 있던 그림 파일 정리 (다른 소개글·표지·장면이 쓰면 남김)."""
-        for n in set(intro_media(old_html)):
-            like = f"%/m/{n}%"
-            used = db.q("""SELECT 1 FROM bots WHERE intro_html LIKE ? OR basic LIKE ? OR cover=?
-                           UNION SELECT 1 FROM versions WHERE intro_html LIKE ? OR basic LIKE ?
-                           UNION SELECT 1 FROM intros WHERE html LIKE ? UNION SELECT 1 FROM marks WHERE image=? UNION SELECT 1 FROM bimages WHERE image=? LIMIT 1""",
-                        (like, like, n, like, like, like, n, n))
-            if not used:
-                drop_media(n)
+        gc_intro(old_html)
 
     def do_PUT(self):
         parts, params = self.route()
@@ -3336,6 +3399,13 @@ class Handler(BaseHTTPRequestHandler):
                 if "title" in d:
                     db.x("UPDATE intros SET title=? WHERE id=?", (str(d["title"] or "").strip()[:300], i["id"]))
                 return self.send(200, {"ok": True, "bot": bot_detail(i["bot_id"])})
+            if p and len(p) == 2 and p[0] == "articles" and p[1].isdigit():
+                r = db.q("SELECT * FROM articles WHERE id=?", (int(p[1]),))
+                if not r:
+                    return self.send(404, {"error": "글이 없어요"})
+                if "title" in d:
+                    db.x("UPDATE articles SET title=? WHERE id=?", (str(d["title"] or "").strip()[:300], r[0]["id"]))
+                return self.send(200, {"ok": True, "articles": article_rows(r[0]["owner"], r[0]["owner_id"])})
             if p and len(p) == 2 and p[0] == "styles" and p[1].isdigit():
                 sid = int(p[1])
                 if not db.q("SELECT 1 FROM styles WHERE id=?", (sid,)):
@@ -3780,12 +3850,20 @@ class Handler(BaseHTTPRequestHandler):
                 db.x("DELETE FROM sgallery WHERE id=?", (int(p[1]),))
                 drop_media(r[0]["image"])
                 return self.send(200, {"ok": True, "gallery": sgallery_rows(r[0]["style_id"])})
+            if p and len(p) == 2 and p[0] == "articles" and p[1].isdigit():
+                r = db.q("SELECT * FROM articles WHERE id=?", (int(p[1]),))
+                if not r:
+                    return self.send(404, {"error": "글이 없어요"})
+                db.x("DELETE FROM articles WHERE id=?", (r[0]["id"],))
+                gc_intro(r[0]["html"])
+                return self.send(200, {"ok": True, "articles": article_rows(r[0]["owner"], r[0]["owner_id"])})
             if p and len(p) == 2 and p[0] in ("styles", "style_images") and p[1].isdigit():
                 id = int(p[1])
                 if p[0] == "styles":
                     imgs = [g["image"] for g in db.q("SELECT image FROM style_images WHERE style_id=? UNION ALL SELECT image FROM sgallery WHERE style_id=?", (id, id))]
                     db.x("DELETE FROM sgallery WHERE style_id=?", (id,))
                     db.x("DELETE FROM style_variants WHERE style_id=?", (id,))
+                    drop_articles("style", id)
                     db.x("DELETE FROM styles WHERE id=?", (id,))
                     drop_media(*imgs)
                     return self.send(200, {"ok": True})

@@ -426,6 +426,8 @@ img.emo{display:block;max-width:min(300px,100%);max-height:380px;width:auto;marg
 .itabs{display:flex;gap:2px;overflow-x:auto;overflow-y:hidden;scrollbar-width:none;border-bottom:1px solid var(--line);margin-bottom:16px}
 .itabs button{flex:none;display:inline-flex;align-items:center;gap:5px;max-width:260px;padding:9px 13px 10px;border:0;border-bottom:2px solid transparent;margin-bottom:-1px;background:none;color:var(--ink3);font:inherit;font-size:14px;font-weight:var(--wu);cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .itabs button:hover{color:var(--ink)}
+.seg.arts{margin-bottom:16px}
+.seg.arts .pill{max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .itabs button[aria-selected=true]{color:var(--ink);border-bottom-color:var(--acc)}
 .itabs .add{color:var(--acc)}
 .vbar{display:flex;align-items:baseline;gap:6px 22px;flex-wrap:wrap;margin:4px 0 12px}
@@ -4141,6 +4143,84 @@ const verName = (x, g) => x.label || (g && x.name !== g.name ? x.name : '기본'
 const putPfile = (gid, pid, f, kind, onProg) => putFile(`/api/pgroups/${gid}/files?persona=${pid || ''}&kind=${kind || ''}&name=${encodeURIComponent(f.name)}`, f, onProg);
 const pfBase = f => ({...f, base: `/api/pfiles/${f.id}`});
 // 페르소나 자료실: 봇 자료실처럼 이 버전 자료 + 폴더 공통 자료 (모듈 · 프리셋 · 무엇이든)
+// ---- 아카 글 (페르소나 폴더·그림체): 봇 소개글처럼 아카 글을 붙여넣어 여러 개 보관 ----
+// cfg: {owner: 'pgroup'|'style', id, list, name, ssKey, count(탭 숫자 칸 선택자), onList(list)}
+function articlesView(el, cfg) {
+  let list = cfg.list, page = null;
+  try { page = +sessionStorage.getItem(cfg.ssKey) || null; } catch (e) {}
+  const set = l => { list = l; cfg.onList(l); const c = $(cfg.count); if (c) c.textContent = l.length || ''; };
+  const draw = () => {
+    if (page !== 'new' && !list.some(a => a.id === page)) page = list.length ? list[0].id : 'new';
+    try { sessionStorage.setItem(cfg.ssKey, page === 'new' ? '' : page); } catch (e) {}
+    const a = list.find(x => x.id === page);
+    el.innerHTML = `${list.length ? `<div class="seg arts" role="tablist" aria-label="아카 글">${list.map((x, i) => `<button class="pill" role="tab" data-a="${x.id}" aria-pressed="${x === a}" title="${h(x.title)}">${h(x.title || `글 ${i + 1}`)}</button>`).join('')}
+      <button class="pill" role="tab" data-a="new" aria-pressed="${page === 'new'}">${ic('plus', 14)}글 추가</button></div>` : ''}<div id="artBox"></div>`;
+    $$('[data-a]', el).forEach(b => b.onclick = () => { page = b.dataset.a === 'new' ? 'new' : +b.dataset.a; draw(); });
+    const box = $('#artBox', el);
+    if (!a) return articleForm(box, null);
+    box.innerHTML = `<article class="article">
+      <div class="ahead"><div style="min-width:0"><h2>${h(a.title || cfg.name)}</h2>
+        <p class="meta">${[a.author && `글쓴이 ${h(a.author)}`, a.url && `<a href="${h(a.url)}" target="_blank" rel="noopener noreferrer">원문 보기</a>`, a.at && `${day(a.at)}에 보관`].filter(Boolean).join(' · ')}</p></div>
+        <div class="row"><button class="btn sm ghost" data-x="name">${ic('edit', 14)}이름</button><button class="btn sm ghost" data-x="new">새로 넣기</button>
+          <button class="btn sm ghost danger" data-x="del" aria-label="이 글 지우기">${ic('trash', 15)}</button></div></div>
+      <div class="prose">${a.html}</div></article>`;
+    $$('.prose a', box).forEach(x => { x.target = '_blank'; x.rel = 'noopener noreferrer'; });
+    $$('.prose img:not(.emoji)', box).forEach(i => { i.style.cursor = 'zoom-in'; i.onclick = () => lightbox(i.src); });
+    $$('.prose video', box).forEach(x => { x.muted = true; });
+    $('[data-x=new]', box).onclick = () => articleForm(box, a);
+    $('[data-x=name]', box).onclick = () => {
+      const m = modal(`<header><h2>글 이름</h2>${xBtn}</header>
+        <div class="bd"><input class="inp" id="inT" value="${h(a.title)}" placeholder="예: 배포 글" maxlength="300"></div>
+        <footer><span class="note">위 칸에 보이는 이름이에요</span><button class="btn" data-close>취소</button><button class="btn pri" data-ok>저장</button></footer>`, 'narrow');
+      const go = async () => { try { set((await api('PUT', `/api/articles/${a.id}`, {title: $('#inT', m).value})).articles); m.close(); draw(); } catch (e) { fail(e); } };
+      $('[data-ok]', m).onclick = go;
+      $('#inT', m).onkeydown = e => { if (e.key === 'Enter' && !e.isComposing) go(); };
+    };
+    $('[data-x=del]', box).onclick = async () => {
+      if (!await confirmBox('글 지우기', `<b>${h(a.title || '이 글')}</b> 글과 그 안의 그림을 지울까요?`)) return;
+      try { set((await api('DELETE', `/api/articles/${a.id}`)).articles); page = null; draw(); } catch (e) { fail(e); }
+    };
+  };
+  // 붙여넣기 칸 (봇 소개글과 같음: Ctrl+A 통째면 본문만 + 제목·글쓴이·주소)
+  const articleForm = (box, it) => {
+    box.innerHTML = `${it ? `<p class="hint" style="margin:0 0 12px"><b>${h(it.title || '이 글')}</b> 글을 새로 붙여넣은 글로 바꿔요</p>` : ''}<div class="imp">
+      <div class="box"><h3>아카 글 붙여넣기</h3><p>아카 글 화면에서 <b>Ctrl+A → Ctrl+C</b>로 통째로 복사해 붙여넣으면 본문만 골라 넣고 제목·글쓴이·주소도 채워요. 일부만 드래그해 복사해도 돼요.
+        접힌 곳까지는 <a class="bmk" data-bmk href="${h(BOOKMARKLET)}">📋 아카 본문 복사</a> 북마크로.</p>
+        <div class="paste" data-p contenteditable="true" data-ph="여기에 붙여넣기 (Ctrl+V)"></div>
+        <p class="hint" data-note hidden style="margin-top:8px"></p>
+        <div class="row" style="margin-top:12px"><input class="inp" data-f="title" placeholder="글 이름 (위 칸에 보여요)" style="flex:1 1 100%;min-height:40px" value="${h(it ? it.title : '')}">
+          <input class="inp" data-f="url" placeholder="원문 주소 (있으면)" style="flex:1;min-height:40px"><input class="inp" data-f="author" placeholder="글쓴이" style="width:120px;min-height:40px"></div>
+        <div class="row" style="margin-top:12px;justify-content:flex-end">${list.length ? '<button class="btn sm ghost" data-cancel>취소</button>' : ''}<button class="btn sm pri" data-save>붙여넣은 글 보관하기</button></div></div></div>`;
+    const f = k => $(`[data-f=${k}]`, box), paste = $('[data-p]', box);
+    $('[data-bmk]', box).onclick = e => { e.preventDefault(); toast('이 단추를 북마크바로 끌어다 놓은 뒤, 아카 글 화면에서 눌러 주세요'); };
+    paste.onpaste = e => {
+      const got = pickArticle(e.clipboardData && e.clipboardData.getData('text/html'));
+      if (!got) return;
+      e.preventDefault();
+      paste.focus();
+      document.execCommand('selectAll'); document.execCommand('insertHTML', false, got.html);
+      if (got.title && !f('title').value.trim()) f('title').value = got.title;
+      if (got.url && !f('url').value.trim()) f('url').value = got.url;
+      if (got.author && !f('author').value.trim()) f('author').value = got.author;
+      const n = $('[data-note]', box); n.hidden = false;
+      n.textContent = `글 화면 전체에서 본문만 골라 넣었어요${got.title ? ` — "${got.title}"` : ''}`;
+    };
+    if ($('[data-cancel]', box)) $('[data-cancel]', box).onclick = () => { if (page === 'new') page = null; draw(); };
+    $('[data-save]', box).onclick = async () => {
+      const html = paste.innerHTML.trim();
+      if (!paste.textContent.trim() && !/<img|<video/i.test(html)) return toast('붙여넣은 글이 없어요', true);
+      const btn = $('[data-save]', box); btn.disabled = true; btn.textContent = '그림 받는 중…';
+      try {
+        const src = f('url').value.trim();
+        const d = await api('POST', '/api/articles', {owner: cfg.owner, owner_id: cfg.id, article_id: it ? it.id : undefined, html,
+          url: /^https?:\/\//.test(src) ? src : '', author: f('author').value.trim(), title: f('title').value.trim()});
+        set(d.articles); page = d.id; draw();
+        toast(d.miss ? `보관했어요 — 그림 ${d.miss}개는 못 가져왔어요` : '글을 보관했어요');
+      } catch (e) { fail(e); btn.disabled = false; btn.textContent = '붙여넣은 글 보관하기'; }
+    };
+  };
+  draw();
+}
 function pfilesView(el, g, x, after) {
   const solo = g.versions.length === 1;
   const mine = g.files.filter(f => f.persona_id === x.id), common = g.files.filter(f => !f.persona_id);
@@ -4532,7 +4612,7 @@ function drawPersona(vid) {
   let sub = location.hash.split('/')[4] || 'main';  // 버전 안 하위 탭: main(프롬프트) · files(자료실) · lore · assets · gallery
   const myFiles = g.files.filter(f => !f.persona_id || f.persona_id === x.id), peek = myFiles.filter(f => PEEK_KINDS.includes(f.kind)).map(pfBase);
   if (sub === 'module') sub = 'files';  // 예전 주소
-  if ((sub === 'lore' || sub === 'assets') && !peek.length || !['main', 'files', 'lore', 'assets', 'gallery'].includes(sub)) sub = 'main';
+  if ((sub === 'lore' || sub === 'assets') && !peek.length || !['main', 'files', 'lore', 'assets', 'gallery', 'posts'].includes(sub)) sub = 'main';
   const subUrl = (v, t = sub) => `#/p/${g.id}/${v.id}${t === 'main' ? '' : '/' + t}`;
   const nChats = g.versions.reduce((n, v) => n + v.chats.length, 0), nBots = g.versions.reduce((n, v) => n + v.bots.length, 0);
   $('#view').innerHTML = `<div class="wrap">
@@ -4557,7 +4637,8 @@ function drawPersona(vid) {
       <button role="tab" data-sub="files" aria-selected="${sub === 'files'}">${ic('folder', 14)}자료실<span class="meta">${myFiles.length || ''}</span></button>
       ${peek.length ? `<button role="tab" data-sub="lore" aria-selected="${sub === 'lore'}">${ic('book', 14)}로어북</button>
       <button role="tab" data-sub="assets" aria-selected="${sub === 'assets'}">${ic('img', 14)}에셋</button>` : ''}
-      <button role="tab" data-sub="gallery" aria-selected="${sub === 'gallery'}">${ic('img', 14)}갤러리<span class="meta">${g.images.filter(i => !i.persona_id || i.persona_id === x.id).length || ''}</span></button></div>
+      <button role="tab" data-sub="gallery" aria-selected="${sub === 'gallery'}">${ic('img', 14)}갤러리<span class="meta">${g.images.filter(i => !i.persona_id || i.persona_id === x.id).length || ''}</span></button>
+      <button role="tab" data-sub="posts" aria-selected="${sub === 'posts'}" title="폴더 공통 — 모든 버전에서 같이 보여요">${ic('memo', 14)}아카 글<span class="meta">${g.articles.length || ''}</span></button></div>
     ${sub !== 'main' ? '<div id="pxSub"></div>' : ''}
     <div class="cols"${sub === 'main' ? '' : ' hidden'}><div style="min-width:0;display:flex;flex-direction:column;gap:18px">
       <div class="box"><h3>프롬프트<span class="meta" style="font-weight:500">리스 이름 ${h(x.name)}</span>${x.prompt ? `<button class="ib" id="pxCp2" aria-label="프롬프트 복사" title="복사">${ic('copy', 16)}</button>` : ''}</h3>
@@ -4590,6 +4671,8 @@ function drawPersona(vid) {
     coverLabel: `'${verName(x, g)}' 그림으로`,
     cover: async i => { await api('PUT', `/api/personas/${x.id}`, {image: await blobData(i.image)}); toast('그림을 바꿨어요'); await reload(); }});
   else if (sub === 'files') pfilesView($('#pxSub'), g, x, () => reload());
+  else if (sub === 'posts') articlesView($('#pxSub'), {owner: 'pgroup', id: g.id, list: g.articles, name: g.name, ssKey: `bs-art-p${g.id}`,
+    count: '.itabs [data-sub=posts] .meta', onList: l => { g.articles = l; }});
   else if (sub === 'lore' || sub === 'assets') {
     $('#pxSub').innerHTML = `${peek.length > 1 ? `<p class="meta" style="margin:0 0 14px">${peek.map(f => `${f.persona_id ? '' : '공통 · '}${h(f.name)}`).join(' · ')}</p>` : ''}<div id="pxPk"></div>`;
     (sub === 'lore' ? loreView : assetView)($('#pxPk'), peek);
@@ -5081,7 +5164,7 @@ function variantDialog(x, v, add) {
 }
 function drawStyle() {
   const x = SY, parts = location.hash.split('/'), vars = styleVars(x);
-  const v = vars.find(y => y.id === +parts[3]) || vars[0], sub = parts[4] === 'gallery' ? 'gallery' : 'main';
+  const v = vars.find(y => y.id === +parts[3]) || vars[0], sub = ['gallery', 'posts'].includes(parts[4]) ? parts[4] : 'main';
   const url = (y, t = sub) => `#/s/${x.id}${y.id || t !== 'main' ? '/' + y.id : ''}${t === 'main' ? '' : '/' + t}`;
   const imgs = x.images.filter(g => (g.variant_id || 0) === v.id), cov = imgs[0] || x.images.find(g => !g.variant_id) || null;
   const set = Object.entries(v.settings || {}).filter(([, val]) => val);
@@ -5108,8 +5191,9 @@ function drawStyle() {
       <button class="vadd" id="syVAdd" title="지금 변형 내용으로 하나 더">${ic('plus', 14)}변형</button></nav>
     <div class="itabs" role="tablist" aria-label="이 변형">
       <button role="tab" data-sub="main" aria-selected="${sub === 'main'}">프롬프트 · 견본</button>
-      <button role="tab" data-sub="gallery" aria-selected="${sub === 'gallery'}">${ic('img', 14)}갤러리<span class="meta">${galN || ''}</span></button></div>
-    ${sub === 'gallery' ? '<div id="sySub"></div>' : ''}
+      <button role="tab" data-sub="gallery" aria-selected="${sub === 'gallery'}">${ic('img', 14)}갤러리<span class="meta">${galN || ''}</span></button>
+      <button role="tab" data-sub="posts" aria-selected="${sub === 'posts'}" title="그림체 공통 — 모든 변형에서 같이 보여요">${ic('memo', 14)}아카 글<span class="meta">${x.articles.length || ''}</span></button></div>
+    ${sub !== 'main' ? '<div id="sySub"></div>' : ''}
     <div class="cols"${sub === 'main' ? '' : ' hidden'}><div style="min-width:0;display:flex;flex-direction:column;gap:18px">
       <div class="box"><h3>프롬프트${v.prompt ? `<button class="ib" data-cp="prompt" aria-label="프롬프트 복사" title="복사">${ic('copy', 16)}</button>` : ''}</h3>
         ${v.prompt ? `<pre class="sprm">${h(v.prompt)}</pre>` : '<p class="hint">아직 프롬프트가 없어요. 고치기에서 넣어 주세요.</p>'}
@@ -5152,6 +5236,8 @@ function drawStyle() {
     if (!await confirmBox('변형 지우기', `<b>${h(svName(vars, v))}</b> 변형을 지울까요?${imgs.length ? ` 이 변형의 견본 그림 ${imgs.length}장도 함께 지워져요.` : ''} 갤러리 그림은 그림체 공통으로 남아요. 되돌릴 수 없어요.`)) return;
     try { SY = await api('DELETE', `/api/style_variants/${v.id}`); replaceHash(`#/s/${x.id}`); toast('지웠어요'); } catch (e) { fail(e); }
   };
+  if (sub === 'posts') articlesView($('#sySub'), {owner: 'style', id: x.id, list: x.articles, name: x.name, ssKey: `bs-art-s${x.id}`,
+    count: '.itabs [data-sub=posts] .meta', onList: l => { x.articles = l; }});
   if (sub === 'gallery') galleryView($('#sySub'), {items: x.gallery, subs: vars.map(y => ({id: y.id, name: svName(vars, y)})), cur: v.id, key: 'variant_id',
     unit: '변형', whole: '그림체', ssKey: 'bs-sgal', meta: true, count: '.itabs [data-sub=gallery] .meta',
     post: async b => (await api('POST', `/api/styles/${x.id}/gallery`, b)).gallery,
