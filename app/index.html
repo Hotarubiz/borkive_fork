@@ -618,6 +618,52 @@ img.emo{display:block;max-width:min(300px,100%);max-height:380px;width:auto;marg
 .gview .gnav{position:absolute;left:8px;top:50%;transform:translateY(-50%);background:rgba(10,10,12,.6);color:#fff}
 .gview .gnav.nx{left:auto;right:8px;transform:translateY(-50%) scaleX(-1)}
 .found{display:flex;flex-direction:column;gap:8px}
+.dlg.wide{width:min(1080px,100%)}
+.dil{display:flex;flex-direction:column;gap:10px}
+.dib{border:1px solid var(--line2);border-radius:16px;background:var(--card2);padding:12px 14px;display:flex;flex-direction:column;gap:10px}
+.dib.off{opacity:.55}
+.dih{display:flex;align-items:center;gap:12px}
+.dih .cv{width:52px;flex:none;border-radius:10px}
+.dit{flex:1;min-width:0;display:flex;flex-direction:column;gap:4px}
+.dit .inp{min-height:38px;font-weight:600}
+.dit .meta{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dia{width:auto;max-width:220px;min-height:38px;flex:none}
+.dif{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.dif .pill{min-height:32px;padding:0 11px;font-size:13px}
+.dif .pill .dot{width:8px;height:8px;border-radius:3px}
+.dif .pill[aria-pressed=true]{border-color:var(--fc);background:color-mix(in srgb,var(--fc) 14%,transparent);color:var(--ink)}
+.dif [data-o]{margin-left:auto}
+.dix{margin:-4px 0 0}
+.dfl{display:flex;flex-direction:column;gap:4px;border-top:1px solid var(--line);padding-top:10px;max-height:340px;overflow-y:auto}
+.dfr{display:flex;align-items:center;gap:10px;font-size:13px}
+.dfr .dp{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--ink2)}
+.dfr select{width:auto;max-width:180px;min-height:32px;font-size:13px;padding:0 8px}
+.dk{flex:none;min-width:58px;text-align:center;padding:2px 8px;border-radius:999px;font-size:12px;font-weight:600;background:var(--line);color:var(--ink2)}
+.dk.k-card{background:var(--acc-bg);color:var(--acc-text)}
+.dk.k-chat{background:color-mix(in srgb,#6FA8DC 20%,transparent)}
+.dk.k-module{background:color-mix(in srgb,#93C47D 20%,transparent)}
+.dierr p{margin:4px 0 0;font-size:12.5px;color:var(--mute)}
+.inbar{display:flex;align-items:center;gap:14px;padding:14px 18px;margin:-6px 0 22px;border-radius:16px;border:1px solid color-mix(in srgb,var(--acc) 40%,transparent);background:var(--acc-bg);color:var(--acc-text);text-decoration:none}
+.inbar span{display:flex;flex-direction:column;flex:1;min-width:0}
+.inbar small{color:var(--ink3);font-size:13px}
+.inbar .go{white-space:nowrap}
+.nav .n.acc{color:var(--acc);font-weight:700}
+.binb{align-items:center;gap:8px;margin-top:10px;font-size:13.5px;color:var(--acc-text)}
+.ibs{display:flex;gap:12px;overflow-x:auto;padding:4px 2px 12px;margin-bottom:12px}
+.ibt{position:relative;flex:none;width:96px;display:flex;flex-direction:column;gap:6px}
+.ibt b{font-size:12.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ibc{padding:0;border:2px solid transparent;border-radius:14px;background:none;cursor:pointer}
+.ibc .cv{border-radius:11px}
+.ibt.on .ibc{border-color:var(--acc)}
+.ibk{position:absolute;top:6px;right:6px;display:flex;padding:4px;border-radius:8px;background:color-mix(in srgb,var(--bg) 70%,transparent)}
+.ibk input{width:16px;height:16px;accent-color:var(--acc);margin:0}
+.ibx{border:1px solid var(--line2);border-radius:20px;background:var(--card);padding:20px 22px;display:flex;flex-direction:column;gap:18px}
+.ibh{display:flex;gap:16px;align-items:center}
+.ibh .cv{width:96px;flex:none;border-radius:14px}
+.ibh h2{margin:0 0 4px;font-family:var(--disp);font-size:24px}
+.ibh .meta{margin:0 0 10px}
+.ibf{justify-content:flex-end;gap:8px}
+@media (max-width:700px){.dih{flex-wrap:wrap}.dia{max-width:none;width:100%}.dfr{flex-wrap:wrap;padding:6px 0;border-bottom:1px solid var(--line)}.dfr .dp{flex:1 1 0}.dfr select{max-width:none;flex-basis:100%}}
 .found label{display:flex;align-items:center;gap:12px;padding:10px 12px;border-radius:12px;border:1px solid var(--line2);background:var(--card2)}
 .found input[type=checkbox]{width:18px;height:18px;accent-color:var(--acc)}
 .found .inp{min-height:38px}
@@ -841,6 +887,7 @@ const ICON = {
   link: '<path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/>',
   img: '<path d="M4 5h16v14H4zM4 16l5-5 4 4 2-2 5 5"/><circle cx="15.5" cy="9" r="1.5"/>',
   folder: '<path d="M3 6h6l2 2h10v11H3z"/>',
+  inbox: '<path d="M4 13l2.5-8h11l2.5 8v6H4zM4 13h5l1 2h4l1-2h5"/>',
   back: '<path d="M15 5l-7 7 7 7"/>',
   play: '<path d="M8 5l11 7-11 7z"/>',
   search: '<circle cx="11" cy="11" r="6"/><path d="M20 20l-4.5-4.5"/>',
@@ -978,6 +1025,7 @@ function renderSide() {
     <a class="logo" href="#/" aria-label="봇카이브 홈"><svg class="lgi" viewBox="0 0 64 64" aria-hidden="true"><rect class="l0" width="64" height="64" rx="16"/><rect class="ls" x="7" y="49" width="50" height="7" rx="3.5"/><rect class="l1" x="9" y="12" width="19" height="37" rx="5"/><circle class="le" cx="14.2" cy="23" r="3"/><circle class="le" cx="22.2" cy="23" r="3"/><rect class="l2" x="30" y="19" width="13" height="30" rx="4.5"/><rect class="l3" x="45" y="13" width="12" height="36" rx="4.5" transform="rotate(11 51 49)"/></svg><span class="lw"><b>봇</b>카이브<i>.</i></span></a>
     <a class="nav" href="#/"${cur('/')}>${ic('home')}홈</a>
     <a class="nav" href="#/all"${cur('/all')}>${ic('all')}서재 전체<span class="n">${st.bots}</span></a>
+    ${st.inbox ? `<a class="nav" href="#/inbox"${cur('/inbox')}>${ic('inbox')}정리 전<span class="n acc">${st.inbox}</span></a>` : ''}
     <a class="nav" href="#/chats"${cur('/chats')}>${ic('chat')}채팅 로그<span class="n">${st.chats}</span></a>
     <a class="nav" href="#/personas"${cur('/personas')}${r.startsWith('/p/') ? ' aria-current="page"' : ''}>${ic('user')}페르소나<span class="n">${st.personas || 0}</span></a>
     <a class="nav" href="#/shelf"${cur('/shelf')}>${ic('box')}자료함<span class="n">${st.items}</span></a>
@@ -1502,9 +1550,10 @@ function realmBox(el, onFile) {
 async function addBot() {
   const m = modal(`<header><h2>봇 들이기</h2><span>카드 파일을 넣으면 이름·표지를 읽어 와요</span>${xBtn}</header>
     <div class="bd" id="addBody">
-      <div class="drop" id="addDrop" tabindex="0" role="button"><span style="color:var(--acc)">${ic('dl', 30, 1.6)}</span><b>카드 파일을 끌어다 놓거나 눌러서 고르기</b><span>.charx · .png · .jpeg · .json — 리스에서 내보낸 카드</span></div>
+      <div class="drop" id="addDrop" tabindex="0" role="button"><span style="color:var(--acc)">${ic('dl', 30, 1.6)}</span><b>카드 파일을 끌어다 놓거나 눌러서 고르기</b><span>.charx · .png · .jpeg · .json — 리스에서 내보낸 카드 · 폴더를 놓으면 폴더째 들이기</span></div>
       <div id="addRealm"></div>
-      <button class="btn ghost" id="addBlank" style="align-self:center">파일 없이 이름만 적어서 만들기</button>
+      <div class="row" style="justify-content:center;gap:8px"><button class="btn ghost" id="addDir">${ic('folder', 16)}폴더째 들이기 — 봇 여러 개 한꺼번에</button>
+        <button class="btn ghost" id="addBlank">파일 없이 이름만 적어서 만들기</button></div>
     </div>`);
   const step2 = async (file, realmUrl) => {
     let c = {name: '', creator: '', info: {}, cover: null};
@@ -1564,14 +1613,351 @@ async function addBot() {
   const drop = $('#addDrop', m);
   drop.onclick = async () => { const [f] = await pick('.charx,.png,.jpg,.jpeg,.json,.zip'); if (f) step2(f); };
   drop.onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); drop.click(); } };
-  dropZone(drop, fs => fs[0] && step2(fs[0]));
+  dropZone(drop, fs => fs[0] && step2(fs[0]), e => dropDir(e) && (m.close(), true));
   $('#addBlank', m).onclick = () => step2(null);
+  $('#addDir', m).onclick = () => { m.close(); pickDir(); };
   realmBox($('#addRealm', m), (f, url) => step2(f, url));
 }
-function dropZone(el, onFiles) {
+function dropZone(el, onFiles, onRaw) {
   el.addEventListener('dragover', e => { e.preventDefault(); el.classList.add('over'); });
   el.addEventListener('dragleave', () => el.classList.remove('over'));
-  el.addEventListener('drop', e => { e.preventDefault(); el.classList.remove('over'); onFiles([...e.dataTransfer.files]); });
+  el.addEventListener('drop', e => { e.preventDefault(); el.classList.remove('over'); if (onRaw && onRaw(e)) return; onFiles([...e.dataTransfer.files]); });
+}
+
+// ---- 폴더째 들이기: 폴더를 통째로 읽어 봇·버전으로 나눈 뒤 미리보기 → '정리 전'으로 들임 ----
+const JUNK = /(^|\/)(\.[^/]*|Thumbs\.db|desktop\.ini|__MACOSX)(\/|$)/i;
+const normName = s => String(s || '').toLowerCase().replace(/[\s_\-·.()\[\]【】「」]+/g, '');
+const dirOf = p => p.includes('/') ? p.slice(0, p.lastIndexOf('/')) : '';
+const baseOf = p => p.slice(p.lastIndexOf('/') + 1);
+const under = (p, d) => d === '' || p === d || p.startsWith(d + '/');
+// 카드·버전 칸 이름으로 흔히 쓰는 폴더 (봇 이름이 아님)
+const GENERIC_DIR = /^(cards?|카드|봇|bots?|chars?|캐릭터|v?\d[\w.\-]*|버전.*|ver(sion)?s?.*|latest|최신|원본|files?|파일|자료)$/i;
+// 끌어다 놓은 것: 하위 폴더까지 파일을 경로와 함께 모음 (webkitGetAsEntry는 drop 처리 중에 바로 불러야 해서 entries를 먼저 받음)
+async function walkEntries(ents) {
+  const out = [];
+  const walk = async (e, path) => {
+    if (e.isFile) { const f = await new Promise((res, rej) => e.file(res, rej)); out.push({file: f, path: path + f.name}); return; }
+    if (!e.isDirectory) return;
+    const r = e.createReader();
+    for (;;) {
+      const batch = await new Promise((res, rej) => r.readEntries(res, rej));
+      if (!batch.length) break;
+      for (const x of batch) await walk(x, path + e.name + '/');
+    }
+  };
+  for (const e of ents) await walk(e, '');
+  return out;
+}
+function dropDir(e) {  // 폴더(또는 파일 여러 개)를 놓았으면 폴더째 들이기로 넘기고 true
+  const ents = [...(e.dataTransfer.items || [])].map(i => i.webkitGetAsEntry && i.webkitGetAsEntry()).filter(Boolean);
+  if (!ents.some(x => x.isDirectory) && ents.length < 2) return false;
+  walkEntries(ents).then(dirImport).catch(fail);
+  return true;
+}
+function pickDir() {
+  const i = document.createElement('input');
+  i.type = 'file'; i.multiple = true; i.webkitdirectory = true;
+  i.onchange = () => dirImport([...i.files].map(f => ({file: f, path: f.webkitRelativePath || f.name})));
+  i.click();
+}
+// 파일 하나 종류 정하기: 카드 · 모듈 · 채팅 로그 · 그 밖 (확장자보다 내용으로)
+async function scanOne(x) {
+  const n = x.file.name;
+  x.kind = kindOf(n);
+  if (/\.(charx|risuchar|png|jpe?g|json)$/i.test(n) && !(/\.json$/i.test(n) && x.file.size > 5e6)) {
+    try {
+      const c = await readCard(x.file);
+      if (c.module) x.kind = 'module';
+      else if (c.info && c.info.lore != null) { x.kind = 'card'; x.card = c; }
+    } catch (e) {}
+  }
+  if (x.kind !== 'card' && /\.jsonl?$/i.test(n)) {
+    try { x.chats = parseChats(await x.file.text(), n); x.kind = 'chat'; } catch (e) {}
+  }
+  return x;
+}
+const verCmp = (a, b) => String(a.card.info.version || '').localeCompare(String(b.card.info.version || ''), 'ko', {numeric: true})
+  || a.path.localeCompare(b.path, 'ko', {numeric: true}) || a.file.lastModified - b.file.lastModified;
+// 봇으로 나누기: 카드 이름이 같으면 한 봇(카드 여러 장 = 버전), 나머지 파일은 가장 가까운 봇 폴더로
+function groupScan(items, have) {
+  const bots = [], byKey = new Map();
+  const mk = (name, extra = {}) => { const g = {key: 'g' + bots.length, name, creator: '', items: [], folders: new Set(), action: 'new', ...extra}; bots.push(g); return g; };
+  for (const x of items.filter(x => x.kind === 'card')) {
+    const k = normName(x.card.name) || normName(baseOf(x.path));
+    let g = byKey.get(k);
+    if (!g) { g = mk(x.card.name || baseOf(x.path).replace(/\.[^.]+$/, '')); byKey.set(k, g); }
+    if (!g.creator && x.card.creator) g.creator = x.card.creator;
+    x.g = g; g.items.push(x);
+  }
+  const cardDirs = g => g.items.filter(x => x.kind === 'card').map(x => dirOf(x.path));
+  const others = g => bots.filter(o => o !== g).flatMap(cardDirs);
+  for (const g of bots) {
+    // 봇 폴더 = 카드 폴더들의 공통 조상, 다른 봇 카드가 없으면 '카드'·'v2' 같은 칸이나 봇 이름 폴더까지 올라감
+    let root = cardDirs(g).reduce((a, d) => { while (!under(d, a)) a = dirOf(a); return a; });
+    const clash = r => others(g).some(d => under(d, r));
+    g.shared = clash(root);
+    while (!g.shared && root.includes('/')) {
+      const up = dirOf(root), nm = normName(baseOf(up)), me = normName(g.name);
+      if (clash(up) || !(GENERIC_DIR.test(baseOf(root)) || (nm && me && (nm.includes(me) || me.includes(nm))))) break;
+      root = up;
+    }
+    g.root = root;
+  }
+  // 카드 아닌 파일: 그 파일을 품은 봇 폴더 중 가장 깊은 것 (여러 봇이 한 폴더에 섞여 있으면 파일 이름에 봇 이름이 든 것)
+  const loose = new Map();
+  for (const x of items.filter(x => x.kind !== 'card')) {
+    const d = dirOf(x.path);
+    let g = bots.filter(o => !o.shared && under(d, o.root)).sort((a, b) => b.root.length - a.root.length)[0];
+    if (!g) { const nm = normName(x.file.name); g = bots.find(o => o.shared && d === o.root && normName(o.name).length > 1 && nm.includes(normName(o.name))); }
+    if (!g && bots.length === 1) g = bots[0];
+    if (g) { x.g = g; g.items.push(x); continue; }
+    if (!loose.has(d)) loose.set(d, []);
+    loose.get(d).push(x);
+  }
+  // 봇을 못 찾은 파일: 폴더마다 '카드 없는 봇' 후보로 (폴더 이름이 봇 이름과 비슷하면 그 봇에 붙임)
+  for (const [d, xs] of loose) {
+    const nm = normName(baseOf(d));
+    const near = nm && bots.find(o => normName(o.name) === nm);
+    // 여러 봇을 품은 폴더(맨 위 등)에 흩어진 파일은 어느 봇 것인지 몰라서 '안 들임'으로 두고 펼쳐 보여 줌
+    const orphan = !near && bots.some(o => !o.cardless && under(o.root, d));
+    const g = near || mk(orphan ? `봇을 못 찾은 파일 · ${d || '맨 위'}` : baseOf(d) || '이름 없는 봇', {root: d, cardless: true, orphan,
+      action: !orphan && d && xs.some(x => x.kind === 'chat' || x.kind === 'module') ? 'new' : 'skip'});
+    xs.forEach(x => { x.g = g; g.items.push(x); });
+  }
+  // 버전: 카드 한 장 = 버전 하나. 카드 폴더 안 파일은 그 버전, 봇 폴더 바로 아래 파일은 공통 (카드가 한 장뿐이면 다 그 버전)
+  const fnames = new Map(botFolders().map(f => [normName(f.name), f.id]));
+  for (const g of bots) {
+    const cards = g.items.filter(x => x.kind === 'card').sort(verCmp);
+    for (const x of g.items) {
+      if (x.kind === 'card') { x.ver = x; continue; }
+      const d = dirOf(x.path);
+      const own = cards.filter(c => under(d, dirOf(c.path)) && (cards.length === 1 || dirOf(c.path) !== g.root));
+      x.ver = cards.length === 1 ? cards[0] : own.length ? own.sort((a, b) => dirOf(b.path).length - dirOf(a.path).length || verCmp(b, a))[0] : null;
+    }
+    // 폴더 이름이 봇카이브 폴더 이름과 같으면 미리 골라 둠
+    for (const x of g.items) dirOf(x.path).split('/').forEach(s => { const id = fnames.get(normName(s)); if (id) g.folders.add(id); });
+    const ex = !g.cardless && have.find(b => normName(b.name) === normName(g.name) && (!g.creator || !b.creator || b.creator === g.creator));
+    if (ex) { g.action = 'have:' + ex.id; g.exists = ex; }
+  }
+  return bots;
+}
+const DKIND = {card: '카드', module: '모듈', preset: '프리셋', chat: '채팅 로그', images: '그림', memo: '메모', plugin: '플러그인', etc: '기타'};
+function dirVerName(x, g, cards) {  // 버전 폴더 이름(카드·v2 같은 칸 이름은 빼고) → 없으면 카드 버전 → 겹치면 파일 이름
+  const d = dirOf(x.path), dn = d !== g.root && !/^(cards?|카드|원본|files?|파일)$/i.test(baseOf(d)) ? baseOf(d) : '';
+  const name = dn || (x.card.info.version ? 'v' + x.card.info.version : '');
+  if (cards.length < 2) return name;
+  const dup = cards.filter(c => c !== x && (dirOf(c.path) !== g.root && baseOf(dirOf(c.path)) === dn ? dn : c.card.info.version && 'v' + c.card.info.version) === name);
+  return name && !dup.length ? name : x.file.name.replace(/\.[^.]+$/, '');
+}
+async function dirImport(list) {
+  list = list.filter(x => !JUNK.test(x.path) && x.file.size > 0);
+  if (!list.length) return toast('들일 파일이 없어요', true);
+  const m = modal(`<header><h2>폴더째 들이기</h2><span id="diSub">파일 ${list.length}개</span>${xBtn}</header>
+    <div class="bd" id="diBody"><p class="hint" id="diSt">파일을 읽는 중…</p><div class="prog"><i id="diBar"></i></div></div>`);
+  for (const [i, x] of list.entries()) {
+    if (!m.isConnected) return;
+    $('#diSt', m).textContent = `파일을 읽는 중 ${i + 1}/${list.length} · ${x.path}`;
+    $('#diBar', m).style.width = ((i + 1) / list.length * 100) + '%';
+    await scanOne(x);
+  }
+  const have = await api('GET', '/api/bots');
+  let bots = groupScan(list, have);
+  const open = new Set(bots.filter(g => g.orphan).map(g => g.key));
+  const live = () => bots.filter(g => g.items.length);
+  const draw = () => {
+    bots = live();
+    const go = bots.filter(g => g.action !== 'skip');
+    $('#diSub', m).textContent = `봇 ${bots.length}개 · 파일 ${list.length}개`;
+    $('#diBody', m).innerHTML = `<p class="hint">카드 이름으로 봇을 나눴어요. 잘못 묶인 파일은 '파일 보기'에서 옮기고, 같은 봇이 둘로 나뉘었으면 합치세요.</p>
+      <div class="dil">${bots.map(g => {
+        const cards = g.items.filter(x => x.kind === 'card').sort(verCmp), top = cards[cards.length - 1];
+        const cnt = {}; g.items.forEach(x => cnt[x.kind] = (cnt[x.kind] || 0) + 1);
+        const msgs = g.items.filter(x => x.chats).reduce((s, x) => s + x.chats.length, 0);
+        const sum = [cards.length > 1 ? `버전 ${cards.length}` : '', ...Object.entries(cnt).map(([k, n]) => k === 'chat' ? `채팅 로그 ${msgs}` : `${DKIND[k] || k} ${n}`)].filter(Boolean).join(' · ');
+        return `<div class="dib${g.action === 'skip' ? ' off' : ''}" data-g="${g.key}">
+          <div class="dih"><div class="cv" style="background:${tint(bots.indexOf(g))}">${top && top.card.cover ? `<img src="${top.card.cover}" alt="">` : `<span class="ph">${h([...(g.name || '?')][0])}</span>`}</div>
+            <div class="dit"><input class="inp" data-n value="${h(g.name)}" aria-label="봇 이름">
+              <span class="meta">${g.cardless ? '카드 없음 · ' : ''}${h(sum)}${g.root ? ` · <span title="${h(g.root)}">${h(g.root)}</span>` : ''}</span></div>
+            <select class="inp dia" data-a aria-label="어떻게 들일까요">
+              <option value="new"${g.action === 'new' ? ' selected' : ''}>새 봇으로 들이기</option>
+              ${g.exists ? `<option value="have:${g.exists.id}"${g.action.startsWith('have:') ? ' selected' : ''}>서재에 있는 봇에 더하기</option>` : ''}
+              <option value="skip"${g.action === 'skip' ? ' selected' : ''}>안 들임</option>
+              ${bots.length > 1 ? `<optgroup label="다른 봇과 합치기">${bots.filter(o => o !== g).map(o => `<option value="merge:${o.key}">→ ${h(o.name)}</option>`).join('')}</optgroup>` : ''}
+            </select></div>
+          ${g.exists && g.action.startsWith('have:') ? `<p class="hint dix">서재에 같은 이름의 봇이 있어서 거기에 더해요. 이미 있는 파일·로그는 건너뛰어요.</p>` : ''}
+          <div class="dif">${botFolders().map(f => `<button type="button" class="pill" data-f="${f.id}" aria-pressed="${g.folders.has(f.id)}" style="--fc:${f.color}"><span class="dot" style="background:${f.color}"></span>${h(f.name)}</button>`).join('')}
+            <button type="button" class="btn sm ghost" data-o>${open.has(g.key) ? '파일 접기' : `파일 보기 ${g.items.length}`}</button></div>
+          ${open.has(g.key) ? `<div class="dfl">${g.items.slice().sort((a, b) => a.path.localeCompare(b.path, 'ko', {numeric: true})).map(x => `<div class="dfr">
+            <span class="dk k-${x.kind}">${DKIND[x.kind] || x.kind}</span><span class="dp" title="${h(x.path)}">${h(x.path)}${x.kind === 'card' && cards.length > 1 ? ` <b>· ${h(dirVerName(x, g, cards) || '버전')}</b>` : ''}</span>
+            <select class="inp" data-x="${list.indexOf(x)}" aria-label="어느 봇으로">${bots.map(o => `<option value="${o.key}"${o === g ? ' selected' : ''}>${h(o.name)}</option>`).join('')}<option value="-">안 들임</option></select></div>`).join('')}</div>` : ''}
+        </div>`;
+      }).join('')}</div>`;
+    $('footer .note', m).textContent = `들인 봇은 '정리 전'에 모여요 — 폴더·상태·태그는 거기서 하나씩 골라도 돼요`;
+    $('#diOk', m).textContent = go.length ? `봇 ${go.length}개 들이기` : '들일 봇이 없어요';
+    $('#diOk', m).disabled = !go.length;
+    $$('.dib', m).forEach(el => {
+      const g = bots.find(o => o.key === el.dataset.g);
+      $('[data-n]', el).onchange = e => g.name = e.target.value.trim() || g.name;
+      $('[data-a]', el).onchange = e => {
+        const v = e.target.value;
+        if (v.startsWith('merge:')) {  // 합치기: 파일을 그 봇으로 옮기고 이 줄은 없어짐
+          const o = bots.find(b => b.key === v.slice(6));
+          g.items.forEach(x => { x.g = o; if (x.kind !== 'card') x.ver = null; o.items.push(x); });
+          g.folders.forEach(f => o.folders.add(f));
+          g.items = [];
+        } else g.action = v;
+        draw();
+      };
+      $$('[data-f]', el).forEach(b => b.onclick = () => { const id = +b.dataset.f; g.folders.has(id) ? g.folders.delete(id) : g.folders.add(id); b.setAttribute('aria-pressed', g.folders.has(id)); });
+      $('[data-o]', el).onclick = () => { open.has(g.key) ? open.delete(g.key) : open.add(g.key); draw(); };
+      $$('[data-x]', el).forEach(s => s.onchange = () => {
+        const x = list[+s.dataset.x];
+        g.items.splice(g.items.indexOf(x), 1);
+        if (s.value === '-') { list.splice(list.indexOf(x), 1); x.g = null; }
+        else { const o = bots.find(b => b.key === s.value); x.g = o; x.ver = x.kind === 'card' ? x : null; o.items.push(x); open.add(o.key); }
+        draw();
+      });
+    });
+  };
+  m.querySelector('.dlg').classList.add('wide');
+  m.querySelector('.dlg').insertAdjacentHTML('beforeend', `<footer><span class="note"></span><button class="btn" data-close>취소</button><button class="btn pri" id="diOk">들이기</button></footer>`);
+  $('footer [data-close]', m).onclick = m.close;
+  draw();
+  $('#diOk', m).onclick = () => dirRun(m, live().filter(g => g.action !== 'skip'));
+}
+// 실제로 들이기: 봇 만들기 → 카드마다 버전 → 나머지 파일 → 채팅 로그. 서재에 있는 봇에 더할 땐 같은 파일·로그는 건너뜀
+async function dirRun(m, bots) {
+  const ok = $('#diOk', m);
+  ok.disabled = true;
+  $('footer [data-close]', m).hidden = true;
+  const total = bots.reduce((s, g) => s + g.items.length, 0);
+  let done = 0, made = 0, skipped = 0;
+  const errs = [];
+  $('#diBody', m).innerHTML = `<p class="hint" id="diSt">들이는 중…</p><div class="prog"><i id="diBar"></i></div><div class="dierr" id="diErr"></div>`;
+  const st = t => { $('#diSt', m).textContent = t; $('#diBar', m).style.width = (done / Math.max(total, 1) * 100) + '%'; };
+  const err = (x, e) => { errs.push(`${x ? x.path : ''}: ${e.message}`); $('#diErr', m).innerHTML = errs.slice(-6).map(t => `<p>${h(t)}</p>`).join(''); };
+  for (const g of bots) {
+    const cards = g.items.filter(x => x.kind === 'card').sort(verCmp), top = cards[cards.length - 1];
+    let bid, old = null;
+    try {
+      if (g.action.startsWith('have:')) { bid = +g.action.slice(5); old = await api('GET', `/api/bots/${bid}`); }
+      else {
+        const b = await api('POST', '/api/bots', {name: g.name, creator: g.creator, status: 'later', inbox: true, folders: [...g.folders],
+          info: top ? top.card.info : {}, cover: top && top.card.cover || undefined});
+        bid = b.id; made++;
+      }
+    } catch (e) { err(null, new Error(`${g.name}: ${e.message}`)); done += g.items.length; continue; }
+    const dup = x => old && old.files.find(f => f.name === x.file.name && f.size === x.file.size);
+    const vids = new Map(), skip0 = skipped;
+    for (const [i, x] of cards.entries()) {
+      st(`${g.name} · 카드 ${i + 1}/${cards.length}`);
+      try {
+        const same = dup(x);
+        if (same) { vids.set(x, same.version_id); skipped++; }
+        else {
+          const v = await api('POST', '/api/versions', {bot_id: bid, name: dirVerName(x, g, cards), info: x.card.info, current: x === top});
+          vids.set(x, v.id);
+          await upload(x.file, {bot: bid, version: v.id, kind: 'card', name: x.file.name}, p => $('#diBar', m).style.width = ((done + p) / total * 100) + '%');
+        }
+      } catch (e) { err(x, e); }
+      done++;
+    }
+    const oldChats = new Set(old ? old.chats.map(c => `${c.title}|${c.count}`) : []);
+    for (const x of g.items.filter(x => x.kind !== 'card')) {
+      st(`${g.name} · ${x.file.name}`);
+      try {
+        if (x.chats) {
+          for (const c of x.chats) {
+            if (oldChats.has(`${c.title}|${c.msgs.length}`)) { skipped++; continue; }
+            await api('POST', '/api/chats', {bot_id: bid, title: c.title, memo: c.memo, source: x.path, messages: c.msgs});
+          }
+        } else if (dup(x)) skipped++;
+        else {
+          const vid = x.ver && vids.get(x.ver);
+          await upload(x.file, {bot: bid, kind: x.kind, name: x.file.name, ...(vid ? {version: vid} : {})},
+            p => $('#diBar', m).style.width = ((done + p) / total * 100) + '%');
+        }
+      } catch (e) { err(x, e); }
+      done++;
+    }
+    const added = g.items.reduce((s, x) => s + (x.chats ? x.chats.length : 1), 0) > skipped - skip0;  // 있던 봇은 새로 들어간 게 있을 때만 다시 '정리 전'으로
+    if (old && !old.inbox && added) await api('PUT', `/api/bots/${bid}`, {inbox: true, ...(g.folders.size ? {folders: [...new Set([...old.folders, ...g.folders])]} : {})}).catch(() => {});
+  }
+  st(`다 됐어요 — 새 봇 ${made}개${bots.length - made ? ` · 있던 봇에 더함 ${bots.length - made}개` : ''}${skipped ? ` · 이미 있어서 건너뜀 ${skipped}개` : ''}${errs.length ? ` · 못 들인 것 ${errs.length}개` : ''}`);
+  $('#diBar', m).style.width = '100%';
+  await loadState();
+  ok.disabled = false; ok.textContent = '정리하러 가기';
+  ok.onclick = () => { m.close(); location.hash = '#/inbox'; };
+  $('footer [data-close]', m).hidden = false;
+  $('footer [data-close]', m).textContent = '닫기';
+  $('footer [data-close]', m).onclick = () => { m.close(); route(); };
+}
+
+// ---- 정리 전: 폴더째 들인 봇을 하나씩 (여러 개 골라 한꺼번에도) 폴더·상태·태그 정하기 ----
+async function viewInbox() {
+  const all = (await api('GET', '/api/bots')).filter(b => b.inbox).sort((a, b) => a.id - b.id);
+  const view = $('#view');
+  if (!all.length) {
+    view.innerHTML = `<div class="wrap"><div class="empty"><h3>정리할 봇이 없어요</h3><p>폴더째 들인 봇은 여기 모였다가, 정리를 끝내면 서재로 들어가요.</p>
+      <a class="btn" href="#/all">서재 전체로</a></div></div>`;
+    return;
+  }
+  let cur = all[0].id;
+  const picked = new Set();
+  const draw = () => {
+    const sel = picked.size > 1 ? all.filter(b => picked.has(b.id)) : [all.find(b => b.id === cur) || all[0]];
+    const one = sel.length === 1 ? sel[0] : null;
+    const chosen = new Set(one ? one.folders : []);
+    let status = one ? one.status : '';
+    view.innerHTML = `<div class="wrap">
+      <div class="mhead"><div class="k">정리 전 · ${all.length}개 남음</div><h1>하나씩 꽂아 볼까요</h1>
+        <p>폴더째 들인 봇이에요. 폴더·상태·태그를 고르고 '정리 끝'을 누르면 서재로 들어가요. 여러 개를 골라 한꺼번에 정해도 돼요.</p></div>
+      <div class="ibs">${all.map(b => `<div class="ibt${(picked.size > 1 ? picked.has(b.id) : b.id === (one && one.id)) ? ' on' : ''}" data-b="${b.id}">
+        <button type="button" class="ibc" aria-label="${h(b.name)} 고르기">${cover(b)}</div></button>
+        <label class="ibk" title="여러 개 고르기"><input type="checkbox" data-k="${b.id}"${picked.has(b.id) ? ' checked' : ''}></label><b>${h(b.name)}</b></div>`).join('')}</div>
+      <section class="ibx">
+        ${one ? `<div class="ibh">${cover(one)}</div><div><h2>${h(one.name)}</h2>
+          <p class="meta">${one.creator ? h(one.creator) + ' · ' : ''}${[one.version ? `지금 버전 ${h(one.version)}` : '', `자료 ${one.files}`, one.chats ? `채팅 로그 ${one.chats}` : ''].filter(Boolean).join(' · ')}</p>
+          <a class="btn sm ghost" href="#/b/${one.id}">봇 페이지 열기 →</a></div></div>`
+        : `<div class="ibh"><div><h2>${sel.length}개 한꺼번에</h2><p class="meta">${h(sel.map(b => b.name).join(', '))}</p>
+          <p class="hint">고른 폴더·태그는 더해지고, 상태는 고른 경우에만 바뀌어요.</p></div></div>`}
+        <div><p class="legend">어느 폴더에 꽂을까요?<span>여러 곳에 같이 넣을 수 있어요</span></p><div class="ftiles" id="ixF"></div></div>
+        <div class="field">상태<div class="seg" id="ixS">${Object.entries(STATUS).map(([k, v]) => `<button type="button" class="pill" data-s="${k}" aria-pressed="${k === status}">${h(v)}</button>`).join('')}</div></div>
+        <label class="field">태그<input class="inp" id="ixT" maxlength="400" placeholder="쉼표로 여러 개 — 예: 판타지, 육성" value="${one ? h(one.tags.join(', ')) : ''}"></label>
+        <div class="row ibf">${one && all.length > 1 ? `<button class="btn" id="ixLater">나중에 →</button>` : ''}
+          <button class="btn pri" id="ixDone">${one ? '정리 끝' : `${sel.length}개 정리 끝`}${all.length > sel.length ? ' → 다음' : ''}</button></div>
+      </section></div>`;
+    folderTiles($('#ixF'), chosen);
+    $$('#ixS .pill').forEach(x => x.onclick = () => { status = status === x.dataset.s && !one ? '' : x.dataset.s; $$('#ixS .pill').forEach(y => y.setAttribute('aria-pressed', y.dataset.s === status)); });
+    $$('.ibc').forEach(x => x.onclick = () => { picked.clear(); cur = +x.closest('.ibt').dataset.b; draw(); });
+    $$('[data-k]').forEach(x => x.onchange = () => {
+      const id = +x.dataset.k;
+      if (x.checked) { if (!picked.size && one) picked.add(one.id); picked.add(id); } else picked.delete(id);
+      if (picked.size === 1) { cur = [...picked][0]; picked.clear(); }
+      draw();
+    });
+    const next = ids => { const i = all.findIndex(b => ids.includes(b.id)); const rest = all.filter(b => !ids.includes(b.id)); return (rest[i] || rest[i - 1] || rest[0] || {}).id; };
+    if ($('#ixLater')) $('#ixLater').onclick = () => { const i = all.indexOf(one); cur = all[(i + 1) % all.length].id; draw(); };
+    $('#ixDone').onclick = async () => {
+      const btn = $('#ixDone'); btn.disabled = true;
+      const tags = $('#ixT').value.split(',').map(t => t.trim().replace(/^#/, '')).filter(Boolean);
+      try {
+        for (const b of sel) {
+          await api('PUT', `/api/bots/${b.id}`, one ? {folders: [...chosen], status, tags, inbox: false}
+            : {folders: [...new Set([...b.folders, ...chosen])], tags: [...b.tags, ...tags], inbox: false, ...(status ? {status} : {})});
+        }
+        const ids = sel.map(b => b.id);
+        cur = next(ids);
+        ids.forEach(id => all.splice(all.findIndex(b => b.id === id), 1));
+        picked.clear();
+        await loadState();
+        toast(sel.length > 1 ? `${sel.length}개를 서재에 꽂았어요` : `${sel[0].name}을(를) 서재에 꽂았어요`);
+        if (!all.length) return viewInbox();
+        draw();
+      } catch (e) { fail(e); btn.disabled = false; }
+    };
+  };
+  draw();
 }
 
 // ---- 홈 숫자: 봇 · 지금 버전 로어북 토큰 · 채팅 로그 토큰 · 지금 버전 에셋 (처음 셀 때는 몇 초 걸려서 나중에 채움) ----
@@ -1660,6 +2046,7 @@ async function viewMain() {
     <div class="mhead"><div class="k">자료 ${st.items} · 그림체 ${st.styles}</div>
       <h1>${h(gr.title)}</h1>
       <p>${playing ? `지금 ${h(STATUS.playing)}인 봇이 ${playing}개 있어요.` : '리스에 다 넣어 두지 않아도, 여기 꽂아 두면 잊지 않아요.'}</p></div>
+    ${st.inbox ? `<a class="inbar" href="#/inbox">${ic('inbox', 22)}<span><b>정리 전 봇 ${st.inbox}개</b><small>폴더째 들인 봇이 폴더를 기다려요</small></span><b class="go">정리하기 →</b></a>` : ''}
     <div class="mstats" id="mStats">${statTiles(null, bots.length)}</div>
     <div class="mgrid">
       ${card('#/all', '서재 전체', 'var(--acc)', bots, botFolders().filter(f => f.count).map(f => `${h(f.name)} ${f.count}`).join(' · '))}
@@ -1796,6 +2183,7 @@ function drawBot(tab) {
           <button class="ib" id="bStEdit" aria-label="상태 고치기" title="상태 고치기 · 더하기">${ic('edit', 16)}</button></div>`}
 </div>
         <div class="row btags" id="bTags"></div>
+        ${b.inbox ? `<div class="row binb">${ic('inbox', 16)}<span>정리 전 — 폴더를 넣으면 정리 끝으로 봐요</span><button class="btn sm" id="bInDone">정리 끝</button><a class="btn sm ghost" href="#/inbox">정리 전 모아 보기</a></div>` : ''}
         <div class="row" style="margin-top:18px">
           ${item ? (mainF ? `<a class="btn sm pri" href="/f/${mainF.file}">${ic('dl', 16)}파일 내려받기</a>` : `<a class="btn sm" href="#/b/${b.id}/files" data-rep>${ic('dl', 16)}파일 올리기</a>`)
           : card ? `<a class="btn sm pri" href="/f/${card.file}">${ic('dl', 16)}카드 내려받기</a>` : `<button class="btn sm" id="bCard">${ic('dl', 16)}카드 파일 올리기</button>`}
@@ -1823,6 +2211,7 @@ function drawBot(tab) {
     $('[data-ok]', m).onclick = () => saveBot({folders: [...chosen]}).then(() => { m.close(); loadState(); drawBot(tab); });
   };
   tagRow(b, cv);
+  if ($('#bInDone')) $('#bInDone').onclick = () => saveBot({inbox: false}).then(() => { loadState(); drawBot(tab); });
   if (item) {
     $('#bTyEdit').onclick = () => labelDialog('itypes', () => viewBot(B.id, curTab()));
     $$('#bType .pill').forEach(x => x.onclick = () => saveBot({itype: x.dataset.t}).then(() => $$('#bType .pill').forEach(y => y.setAttribute('aria-pressed', y === x))));
@@ -4595,6 +4984,7 @@ async function route() {
   try {
     if (!r.length) return await viewMain();
     if (r[0] === 'all') return await viewHome();
+    if (r[0] === 'inbox') return await viewInbox();
     if (r[0] === 'f' && r[1]) return await viewHome(+r[1]);
     if (r[0] === 'b' && r[1]) return await viewBot(+r[1], r[2]);
     if (r[0] === 'c' && r[1]) return await viewChat(+r[1], +r[2] || 0);

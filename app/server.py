@@ -12,7 +12,7 @@ API (JSON):
   GET    /api/state                      폴더·자료함 칸·개수
   GET    /api/bots?folder=&status=       봇 목록(요약)     POST /api/bots
   GET    /api/bots/<id>                  봇 + 폴더 + 링크 + 파일 + 채팅 목록
-  PUT    /api/bots/<id>   DELETE /api/bots/<id>
+  PUT    /api/bots/<id>   DELETE /api/bots/<id>     (inbox = 정리 전 — 폴더를 넣으면 inbox를 안 보내도 정리 끝)
   POST   /api/bots/<id>/intro            {html, version_id?, intro_id?, title?, url?, author?} 붙여넣은 소개글을 그 버전(기본 지금 버전)에
                                          새 글로 저장, intro_id가 있으면 그 글을 바꿈(그림은 받아서 보관)
   PUT    /api/intros/<id>                {title} 글 이름   DELETE /api/intros/<id>
@@ -141,7 +141,7 @@ CSP = ("default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 
        "font-src https://fonts.gstatic.com https://cdn.jsdelivr.net https://hangeul.pstatic.net; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self'; "
        "frame-ancestors 'none'; base-uri 'none'; form-action 'none'")
 
-BOT_FIELDS = {"name": str, "creator": str, "status": str, "itype": str, "in_risu": bool, "memo": str, "info": dict,
+BOT_FIELDS = {"name": str, "creator": str, "status": str, "itype": str, "in_risu": bool, "inbox": bool, "memo": str, "info": dict,
               "intro_url": str, "intro_title": str, "intro_author": str}
 JSON_COLS = {"info"}
 
@@ -298,6 +298,8 @@ class DB:
                 self.c.execute("INSERT INTO statuses(key, name, color, sort, builtin) VALUES (?,?,?,?,1)", (k, n, col, i))
             if self.c.execute("SELECT 1 FROM bots WHERE status='archived' LIMIT 1").fetchone():  # 예전 '보관'에 둔 봇이 있으면 더한 상태로 남김
                 self.c.execute("INSERT INTO statuses(key, name, color, sort) VALUES ('archived','보관','#C7C5CC',3)")
+        if "inbox" not in [r["name"] for r in self.c.execute("PRAGMA table_info(bots)")]:  # 정리 전 (폴더째 들인 뒤 아직 분류 안 한 봇)
+            self.c.execute("ALTER TABLE bots ADD COLUMN inbox INTEGER DEFAULT 0")
         if "itype" not in [r["name"] for r in self.c.execute("PRAGMA table_info(bots)")]:  # 자료함 자료 (''이면 봇)
             self.c.execute("ALTER TABLE bots ADD COLUMN itype TEXT DEFAULT ''")
         if "scope" not in [r["name"] for r in self.c.execute("PRAGMA table_info(folders)")]:  # 서재 폴더(bot) · 자료함 폴더(item)
@@ -410,8 +412,9 @@ def row(r):
             d[k] = json.loads(d[k] or "{}")
         except ValueError:
             d[k] = {}
-    if "in_risu" in d:
-        d["in_risu"] = bool(d["in_risu"])
+    for k in ("in_risu", "inbox"):
+        if k in d:
+            d[k] = bool(d[k])
     if "current" in d:
         d["current"] = bool(d["current"])
     return d
@@ -1478,7 +1481,7 @@ def export_zip(out):
             group = f"자료함/{safe_name(itypes.get(item, item) or '기타')}" if item else f"봇/{safe_name(fl[0] if fl else '폴더 없음')}"
             bdir = slot(f"{root}/{group}", b["name"] or f"봇 {b['id']}")
             taken[bdir] = {"info.txt", "채팅 로그"}
-            mb = {k: b[k] for k in ("name", "creator", "status", "itype", "in_risu", "memo", "info", "created", "updated")} | {
+            mb = {k: b[k] for k in ("name", "creator", "status", "itype", "in_risu", "inbox", "memo", "info", "created", "updated")} | {
                 "tags": tags_of(b["tags"]), "rx": json.loads(b["rx"] or "{}"), "persona": b["persona_id"], "folders": fl, "dir": bdir[len(root) + 1:], "versions": [], "loose": [], "chats": [],
                 "links": db.q("SELECT title, url, note FROM links WHERE bot_id=? ORDER BY sort, id", (b["id"],))}
             if b["cover"]:
@@ -1826,7 +1829,7 @@ def _import_zip(z, job, made):
         if not isinstance(mb, dict):
             continue
         item = txt(mb.get("itype"), 40)
-        vals = clean({k: mb[k] for k in ("name", "creator", "in_risu", "memo", "info") if k in mb}, BOT_FIELDS)
+        vals = clean({k: mb[k] for k in ("name", "creator", "in_risu", "inbox", "memo", "info") if k in mb}, BOT_FIELDS)
         vals.setdefault("name", "이름 없는 봇")
         if (vals["name"], vals.get("creator", ""), bool(item)) in have:
             out["skipped"].append(vals["name"])
@@ -1971,7 +1974,7 @@ def clean_tags(v):
 
 
 def bot_summaries(folder=None, items=False):
-    sql = """SELECT b.id, b.name, b.creator, b.status, b.itype, b.in_risu, b.cover, b.updated, b.opened, b.created, b.tags, b.persona_id,
+    sql = """SELECT b.id, b.name, b.creator, b.status, b.itype, b.in_risu, b.inbox, b.cover, b.updated, b.opened, b.created, b.tags, b.persona_id,
                (SELECT COUNT(*) FROM chats c WHERE c.bot_id=b.id) AS chats,
                (SELECT COUNT(*) FROM files f WHERE f.bot_id=b.id) AS files,
                (SELECT MAX(COALESCE(c.updated, c.created)) FROM chats c WHERE c.bot_id=b.id) AS chat_at,
@@ -1987,6 +1990,7 @@ def bot_summaries(folder=None, items=False):
     for r in rows:
         r["folders"] = fm.get(r["id"], [])
         r["has_intro"] = bool(r["has_intro"])
+        r["inbox"] = bool(r["inbox"])
         r["tags"] = tags_of(r["tags"])
     return rows
 
@@ -2445,6 +2449,7 @@ def state():
         "shelves": db.q("""SELECT s.*, (SELECT COUNT(*) FROM files f WHERE f.shelf_id=s.id AND f.bot_id IS NULL) AS count
                            FROM shelves s ORDER BY sort, id"""),
         "bots": db.q("SELECT COUNT(*) AS n FROM bots WHERE COALESCE(itype, '') = ''")[0]["n"],
+        "inbox": db.q("SELECT COUNT(*) AS n FROM bots WHERE inbox=1")[0]["n"],
         "chats": db.q("SELECT COUNT(*) AS n FROM chats")[0]["n"],
         "loose": db.q("SELECT COUNT(*) AS n FROM files WHERE bot_id IS NULL")[0]["n"],
         "colors": sorted(COLORS),
@@ -2977,6 +2982,8 @@ class Handler(BaseHTTPRequestHandler):
                 vals.setdefault("status", "later")
                 if d.get("cover"):
                     vals["cover"] = save_data_url(d["cover"])
+                if "tags" in d:
+                    vals["tags"] = json.dumps(clean_tags(d["tags"]), ensure_ascii=False)
                 vals["created"] = vals["updated"] = vals["opened"] = now()
                 cols = ", ".join(vals)
                 bid, _ = db.x(f"INSERT INTO bots({cols}) VALUES ({','.join('?' * len(vals))})", tuple(vals.values()))
@@ -3147,6 +3154,8 @@ class Handler(BaseHTTPRequestHandler):
                 if not b:
                     return self.send(404, {"error": "봇이 없어요"})
                 vals = clean(d, BOT_FIELDS)
+                if "inbox" not in d and isinstance(d.get("folders"), list) and d["folders"]:  # 폴더를 넣으면 정리 끝으로 봄
+                    vals["inbox"] = 0
                 if "tags" in d:
                     vals["tags"] = json.dumps(clean_tags(d["tags"]), ensure_ascii=False)
                 if d.get("cover"):
