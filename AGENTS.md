@@ -104,6 +104,7 @@ cd app; $env:DATA_DIR = "..\data"; python server.py   # 윈도우 PowerShell
   - 예전 `data/files/`(무작위 이름)는 켤 때 자동으로 봇 폴더로 옮겨져요.
 - `GET /api/export`: 전부 내보내기 zip을 흘려보내요(`봇/<첫 폴더>/<봇>/<버전 이름>/` · `자료함/<종류>/` · `그림체/<분류>/` · `페르소나/<분류>/<폴더>/<버전>/` · `봇카이브.json`). 페르소나는 봇·로그가 내보낸 서재의 페르소나 id로 가리키고, 그림이 PNG면 리스 페르소나 조각(tEXt `persona`)을 넣어요.
 - 폴더째 들이기(화면만, `dirImport`): 폴더 파일을 브라우저에서 읽어(`scanOne` — 카드·모듈·채팅 로그) `groupScan`으로 봇·버전으로 나눈 뒤 기존 API(`POST /api/bots`·`/api/versions`·`PUT /api/upload`·`POST /api/chats`)로 넣어요. 새로 만든 봇은 `bots.inbox=1`(정리 전, `#/inbox`). `PUT /api/bots/<id>`에 폴더를 넣으면 `inbox`를 따로 안 보내도 0이 돼요.
+- 아카 글 붙여넣기(`arcaPane`·`arcaStep2`): 붙여넣은 글에서 `linkSource`로 받을 링크를 고르고(아카의 `unsafelink.com/` 감싼 주소는 `unwrapLink`로 풂), 랠름은 `/api/realm`, 나머지는 `GET /api/grab?u=`(X-BS, https 공개 주소만 — 넘겨주기마다 `safe_remote` 다시 확인, 웹 페이지가 오면 415, 이름은 `X-Name`)로 받아요. 아카 그림 서버는 틀린 주소에 답 없이 붙잡고 있어서 `grabFile`이 조각이 안 오면 그만둬요. 새 링크 서비스는 `linkSource`에 더하면 돼요.
 - 들이기(`/api/import`): zip을 64MB 이하 조각으로 `data/tmp/import-<토큰>.zip`에 이어 붙이고(같은 파일이면 받아 둔 데부터), `run`이면 스레드에서 `봇카이브.json`을 따라 새로 만들어요. 소개글은 `Cleaner`로 다시 정리하고, 원본은 `tmp/`에 풀어 `place_file`로 옮겨요. 중간에 실패하면 이번에 만든 봇·그림체·그림을 걷어 내요. 내보내기에 칸을 더하면 들이기(`_import_zip`)도 같이 고치고, 시험은 내보내기 → 빈 서재로 들이기 → DB·원본 해시 비교로 해요.
 
 ### 규칙

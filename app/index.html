@@ -642,6 +642,19 @@ img.emo{display:block;max-width:min(300px,100%);max-height:380px;width:auto;marg
 .dk.k-card{background:var(--acc-bg);color:var(--acc-text)}
 .dk.k-chat{background:color-mix(in srgb,#6FA8DC 20%,transparent)}
 .dk.k-module{background:color-mix(in srgb,#93C47D 20%,transparent)}
+.atabs{margin:-8px 0 0}
+.atabs .tab{background:none;border:0;border-bottom:2px solid transparent;font:inherit;font-weight:600;cursor:pointer}
+.apane{display:flex;flex-direction:column;gap:16px}
+.apaste{min-height:150px;max-height:42vh}
+.arl{display:flex;flex-direction:column;gap:6px}
+.arr{display:grid;grid-template-columns:auto auto minmax(0,1fr) minmax(0,auto);align-items:center;gap:10px;font-size:13px;padding:8px 12px;border:1px solid var(--line);border-radius:12px;background:var(--card2)}
+.arr.off{opacity:.65;grid-template-columns:auto minmax(0,1fr) minmax(0,auto)}
+.arr input{width:16px;height:16px;accent-color:var(--acc);margin:0}
+.arr .dp{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--ink2)}
+.ars{color:var(--mute);font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ars:empty{display:none}
+.ars.bad{color:var(--red)}
+@media (max-width:700px){#addSub{display:none}.arr{grid-template-columns:auto auto minmax(0,1fr)}.arr.off{grid-template-columns:auto minmax(0,1fr)}.ars{grid-column:1/-1;white-space:normal}}
 .dierr p{margin:4px 0 0;font-size:12.5px;color:var(--mute)}
 .inbar{display:flex;align-items:center;gap:14px;padding:14px 18px;margin:-6px 0 22px;border-radius:16px;border:1px solid color-mix(in srgb,var(--acc) 40%,transparent);background:var(--acc-bg);color:var(--acc-text);text-decoration:none}
 .inbar span{display:flex;flex-direction:column;flex:1;min-width:0}
@@ -1424,7 +1437,9 @@ async function zipDir(file) {
     const method = cd.getUint16(p + 10, true);
     let csize = cd.getUint32(p + 20, true), usize = cd.getUint32(p + 24, true), lho = cd.getUint32(p + 42, true);
     const nl = cd.getUint16(p + 28, true), xl = cd.getUint16(p + 30, true), cl = cd.getUint16(p + 32, true);
-    const name = new TextDecoder().decode(new Uint8Array(cd.buffer, p + 46, nl));
+    const raw = new Uint8Array(cd.buffer, p + 46, nl);
+    let name;
+    try { name = new TextDecoder('utf-8', {fatal: true}).decode(raw); } catch (e) { name = new TextDecoder('euc-kr').decode(raw); }  // 한국어 윈도우 zip은 이름이 CP949
     let x = p + 46 + nl;
     while (x + 4 <= p + 46 + nl + xl) {
       const id = cd.getUint16(x, true), sz = cd.getUint16(x + 2, true);
@@ -1514,8 +1529,14 @@ async function realmFile(url, onProg) {
   if (!m) throw new Error('랠름 캐릭터 주소(realm.risuai.net/character/…)를 넣어 주세요');
   const r = await fetch(`/api/realm/${m[1]}`, {headers: {'X-BS': '1'}});
   if (!r.ok) { let d = null; try { d = await r.json(); } catch (e) {} throw new Error(d && d.error || `랠름에서 받지 못했어요 (${r.status})`); }
-  const ext = r.headers.get('X-Ext') || 'charx', total = +r.headers.get('Content-Length') || 0;
-  const reader = r.body.getReader(), parts = [];
+  const ext = r.headers.get('X-Ext') || 'charx';
+  let file = new File(await readBody(r, onProg), `realm-${m[1].slice(0, 8)}.${ext}`);
+  try { const c = await readCard(file); if (c.name) file = new File([file], `${fileSafe(c.name)}.${ext}`); } catch (e) {}
+  return {file, url: `https://realm.risuai.net/character/${m[1].toLowerCase()}`};
+}
+// 받는 응답을 조각으로 모음 (받은 크기를 onProg로 알림)
+async function readBody(r, onProg) {
+  const total = +r.headers.get('Content-Length') || 0, reader = r.body.getReader(), parts = [];
   let got = 0;
   for (;;) {
     const {done, value} = await reader.read();
@@ -1523,9 +1544,7 @@ async function realmFile(url, onProg) {
     parts.push(value); got += value.length;
     if (onProg) onProg(got, total);
   }
-  let file = new File(parts, `realm-${m[1].slice(0, 8)}.${ext}`);
-  try { const c = await readCard(file); if (c.name) file = new File([file], `${fileSafe(c.name)}.${ext}`); } catch (e) {}
-  return {file, url: `https://realm.risuai.net/character/${m[1].toLowerCase()}`};
+  return parts;
 }
 // 랠름 주소 칸: 붙여넣으면 바로 받기 시작
 function realmBox(el, onFile) {
@@ -1547,13 +1566,15 @@ function realmBox(el, onFile) {
   inp.onkeydown = e => { if (e.key === 'Enter' && !e.isComposing) go(); };
   inp.addEventListener('paste', () => setTimeout(() => { if (REALM_ID.test(inp.value)) go(); }));
 }
+const ADD_TABS = {card: ['dl', '카드 · 랠름', '카드 파일을 넣으면 이름·표지를 읽어 와요'], dir: ['folder', '폴더', '봇 여러 개를 폴더째 한꺼번에'],
+  arca: ['link', '아카 글 붙여넣기', '글 속 링크에서 봇 파일을 받고, 글은 소개글로']};
 async function addBot() {
-  const m = modal(`<header><h2>봇 들이기</h2><span>카드 파일을 넣으면 이름·표지를 읽어 와요</span>${xBtn}</header>
+  let tab = 'card';
+  try { if (ADD_TABS[localStorage.getItem('bs-addtab')]) tab = localStorage.getItem('bs-addtab'); } catch (e) {}
+  const m = modal(`<header><h2>봇 들이기</h2><span id="addSub"></span>${xBtn}</header>
     <div class="bd" id="addBody">
-      <div class="drop" id="addDrop" tabindex="0" role="button"><span style="color:var(--acc)">${ic('dl', 30, 1.6)}</span><b>카드 파일을 끌어다 놓거나 눌러서 고르기</b><span>.charx · .png · .jpeg · .json — 리스에서 내보낸 카드 · 폴더를 놓으면 폴더째 들이기</span></div>
-      <div id="addRealm"></div>
-      <div class="row" style="justify-content:center;gap:8px"><button class="btn ghost" id="addDir">${ic('folder', 16)}폴더째 들이기 — 봇 여러 개 한꺼번에</button>
-        <button class="btn ghost" id="addBlank">파일 없이 이름만 적어서 만들기</button></div>
+      <nav class="tabs atabs">${Object.entries(ADD_TABS).map(([k, [i, t]]) => `<button type="button" class="tab" data-t="${k}">${ic(i, 16)}${t}</button>`).join('')}</nav>
+      <div class="apane" id="addPane"></div>
     </div>`);
   const step2 = async (file, realmUrl) => {
     let c = {name: '', creator: '', info: {}, cover: null};
@@ -1610,13 +1631,277 @@ async function addBot() {
       } catch (e) { fail(e); btn.disabled = false; btn.textContent = '서재에 꽂기'; }
     };
   };
-  const drop = $('#addDrop', m);
-  drop.onclick = async () => { const [f] = await pick('.charx,.png,.jpg,.jpeg,.json,.zip'); if (f) step2(f); };
-  drop.onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); drop.click(); } };
-  dropZone(drop, fs => fs[0] && step2(fs[0]), e => dropDir(e) && (m.close(), true));
-  $('#addBlank', m).onclick = () => step2(null);
-  $('#addDir', m).onclick = () => { m.close(); pickDir(); };
-  realmBox($('#addRealm', m), (f, url) => step2(f, url));
+  const show = t => {
+    tab = t;
+    try { localStorage.setItem('bs-addtab', t); } catch (e) {}
+    $$('.atabs .tab', m).forEach(b => b.setAttribute('aria-current', b.dataset.t === t ? 'page' : 'false'));
+    $('#addSub', m).textContent = ADD_TABS[t][2];
+    const pane = $('#addPane', m);
+    if (t === 'arca') return arcaPane(m, pane);
+    pane.innerHTML = t === 'card' ? `
+      <div class="drop" id="addDrop" tabindex="0" role="button"><span style="color:var(--acc)">${ic('dl', 30, 1.6)}</span><b>카드 파일을 끌어다 놓거나 눌러서 고르기</b><span>.charx · .png · .jpeg · .json — 리스에서 내보낸 카드</span></div>
+      <div id="addRealm"></div>
+      <button class="btn ghost" id="addBlank" style="align-self:center">파일 없이 이름만 적어서 만들기</button>` : `
+      <div class="drop" id="addDrop" tabindex="0" role="button"><span style="color:var(--acc)">${ic('folder', 30, 1.6)}</span><b>봇 폴더를 끌어다 놓거나 눌러서 고르기</b><span>카드·모듈·채팅 로그가 든 폴더 — 하위 폴더까지 다 봐요</span></div>
+      <p class="hint" style="margin:0">카드 이름이 같으면 한 봇으로, 카드가 여러 장이면 버전으로 묶어서 들이기 전에 보여 줘요. 모듈·채팅 로그·메모는 가까운 봇에 붙여요.<br>
+        들인 봇은 왼쪽 메뉴 <b>정리 전</b>에 모이니, 거기서 폴더·상태·태그를 하나씩 (또는 여러 개 골라 한꺼번에) 정하면 돼요.</p>`;
+    const drop = $('#addDrop', m);
+    drop.onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); drop.click(); } };
+    if (t === 'dir') {
+      drop.onclick = () => { m.close(); pickDir(); };
+      dropZone(drop, fs => fs[0] && step2(fs[0]), e => dropDir(e) && (m.close(), true));
+      return;
+    }
+    drop.onclick = async () => { const [f] = await pick('.charx,.png,.jpg,.jpeg,.json,.zip'); if (f) step2(f); };
+    dropZone(drop, fs => fs[0] && step2(fs[0]), e => dropDir(e) && (m.close(), true));
+    $('#addBlank', m).onclick = () => step2(null);
+    realmBox($('#addRealm', m), (f, url) => step2(f, url));
+  };
+  $$('.atabs .tab', m).forEach(b => b.onclick = () => b.dataset.t !== tab && show(b.dataset.t));
+  show(tab);
+}
+
+// ---- 아카 글 붙여넣기: 글 속 링크(랠름·구글 드라이브·드롭박스 …)와 그림에서 봇 파일을 찾아 받고, 붙여넣은 글은 소개글로 ----
+const BOT_EXT = /\.(charx|risum|risup|risupreset|json|png|jpe?g|webp|zip)$/i;
+// 아카는 바깥 링크를 unsafelink.com/<원래 주소>로 감쌈
+function unwrapLink(u) {
+  u = String(u || '').trim().replace(/[.,)\]>'"]+$/, '');
+  if (u.startsWith('//')) u = 'https:' + u;
+  const m = u.match(/^https?:\/\/(?:www\.)?unsafelink\.com\/(.+)$/i);
+  if (m) { u = m[1]; if (/^https?%3A/i.test(u)) try { u = decodeURIComponent(u); } catch (e) {} }
+  return u;
+}
+// 링크 하나 → {kind: realm|file|link, label, url(보관할 주소), get(받을 주소), why(못 받는 까닭)} — 봇 파일과 상관없는 링크는 null
+function linkSource(raw) {
+  const u = unwrapLink(raw);
+  let x;
+  try { x = new URL(u); } catch (e) { return null; }
+  if (!/^https?:$/.test(x.protocol)) return null;
+  const host = x.hostname.replace(/^www\./, ''), path = x.pathname;
+  let m;
+  if (/(^|\.)(arca\.live|namu\.la)$/.test(host)) return null;  // 아카 다른 글·그림은 따로
+  if ((m = u.match(REALM_ID))) return {kind: 'realm', label: '랠름', url: `https://realm.risuai.net/character/${m[1].toLowerCase()}`};
+  if (host === 'drive.google.com') {
+    const id = (path.match(/\/file\/d\/([\w-]{10,})/) || [])[1] || (!/\/folders\//.test(path) && x.searchParams.get('id'));
+    return id ? {kind: 'file', label: '구글 드라이브', url: u, get: `https://drive.usercontent.google.com/download?id=${id}&export=download&confirm=t`}
+      : {kind: 'link', label: '구글 드라이브', url: u, why: '폴더 링크라 직접 받아야 해요'};
+  }
+  if (/(^|\.)dropbox\.com$/.test(host) && /^\/(s|scl)\//.test(path)) { x.searchParams.set('dl', '1'); return {kind: 'file', label: '드롭박스', url: u, get: x.href}; }
+  if (host === 'pixeldrain.com' && (m = path.match(/^\/u\/(\w+)/))) return {kind: 'file', label: '픽셀드레인', url: u, get: `https://pixeldrain.com/api/file/${m[1]}?download`};
+  if (/^mega\.(nz|io|co\.nz)$/.test(host)) return {kind: 'link', label: 'MEGA', url: u, why: '메가는 암호가 걸려 있어 직접 받아야 해요'};
+  if (host === 'github.com' && (m = path.match(/^\/([^/]+\/[^/]+)\/blob\/(.+)$/))) return {kind: 'file', label: '깃허브', url: u, get: `https://raw.githubusercontent.com/${m[1]}/${m[2]}`};
+  if (/^(chub\.ai|characterhub\.org)$/.test(host) && (m = path.match(/^\/characters\/([^/]+\/[^/?#]+)/))) return {kind: 'file', label: 'chub', url: u, get: `https://avatars.charhub.io/avatars/${m[1]}/chara_card_v2.png`};
+  if (BOT_EXT.test(path)) return {kind: 'file', label: host, url: u, get: x.href.replace(/^http:/, 'https:')};
+  return null;
+}
+// 붙여넣은 글 → 받을 링크 목록 + 아카에 올린 그림 (그림은 원본으로 받아야 카드 정보가 남아 있음)
+function arcaScan(box) {
+  const doc = new DOMParser().parseFromString(box.innerHTML, 'text/html');
+  const urls = [...doc.querySelectorAll('a[href]')].map(a => a.getAttribute('href')).concat(box.innerText.match(/https?:\/\/[^\s<>"']+/g) || []);
+  const seen = new Set(), links = [];
+  for (const u of urls) {
+    const s = linkSource(u);
+    if (s && !seen.has(s.get || s.url)) { seen.add(s.get || s.url); links.push(s); }
+  }
+  const pics = [...new Set([...doc.querySelectorAll('img')].filter(i => !i.matches('.arca-emoticon,.emoji,.emo'))
+    .map(i => unwrapLink(i.getAttribute('src') || i.getAttribute('data-src'))).filter(u => /^https:\/\/[\w.-]*namu\.la\//.test(u) && !/emoticon|twemoji/.test(u)))]
+    .map(u => { const x = new URL(u); x.searchParams.set('type', 'orig'); return x.href; });
+  return {links, pics};
+}
+// 링크의 파일 받기 — stall 동안 한 조각도 안 오면 그만둠 (아카 그림 서버는 주소가 틀리면 답 없이 붙잡고 있음)
+async function grabFile(url, onProg, stall = 60000) {
+  const ac = new AbortController();
+  let timer = setTimeout(() => ac.abort(), stall);
+  try {
+    const r = await fetch('/api/grab?u=' + encodeURIComponent(url), {headers: {'X-BS': '1'}, signal: ac.signal});
+    if (!r.ok) { let d = null; try { d = await r.json(); } catch (e) {} throw new Error(d && d.error || `받지 못했어요 (${r.status})`); }
+    let name = 'file';
+    try { name = decodeURIComponent(r.headers.get('X-Name') || 'file'); } catch (e) {}
+    return new File(await readBody(r, (n, t) => { clearTimeout(timer); timer = setTimeout(() => ac.abort(), stall); if (onProg) onProg(n, t); }), name);
+  } catch (e) {
+    throw e.name === 'AbortError' ? new Error('답이 없어서 그만뒀어요') : e;
+  } finally { clearTimeout(timer); }
+}
+// 받은 .zip 안의 봇 파일 → File 목록 (봇 파일이 없으면 null — zip 그대로 둠)
+async function unzipBot(file) {
+  let list;
+  try { list = await zipDir(file); } catch (e) { return null; }
+  const want = list.filter(en => !en.name.endsWith('/') && !/(^|\/)(__MACOSX|\.)/.test(en.name) && /\.(charx|risum|risup|risupreset|json|png|jpe?g|txt|md)$/i.test(en.name));
+  if (!want.length) return null;
+  const out = [];
+  for (const en of want) out.push(new File([await zipRead(file, en)], en.name.split('/').pop()));
+  return out;
+}
+function arcaPane(m, pane) {
+  const art = {title: '', author: '', url: ''};
+  pane.innerHTML = `
+    <div class="paste apaste" id="arPaste" contenteditable="true" data-ph="아카 글을 여기에 붙여넣기 (Ctrl+V)"></div>
+    <p class="hint" style="margin:0">아카 글 화면에서 <b>Ctrl+A → Ctrl+C</b>로 통째로 복사해 붙여넣으면 본문만 골라요(접힌 곳까지는 <a class="bmk" id="arBmk" href="${h(BOOKMARKLET)}">📋 아카 본문 복사</a> 북마크로).
+      글 속 랠름·구글 드라이브·드롭박스·픽셀드레인·깃허브 링크와 카드 파일 링크를 찾아 받고, 붙여넣은 글은 소개글로 같이 보관해요.</p>
+    <div id="arFound"></div>`;
+  $('#arBmk', m).onclick = e => { e.preventDefault(); toast('이 단추를 북마크바로 끌어다 놓은 뒤, 아카 글 화면에서 눌러 주세요'); };
+  const box = $('#arPaste', m);
+  let found = {links: [], pics: []}, timer = 0;
+  const draw = () => {
+    found = arcaScan(box);
+    const el = $('#arFound', m);
+    if (!box.textContent.trim() && !box.querySelector('img')) { el.innerHTML = ''; return; }
+    const {links, pics} = found;
+    el.innerHTML = `<p class="legend">찾은 것<span>${links.length || pics.length ? '받을 것만 고르세요' : ''}</span></p>
+      ${links.length || pics.length ? '' : `<p class="hint">받을 링크를 못 찾았어요. 드래그해서 복사하면 링크 주소가 빠질 수 있으니 <b>Ctrl+A</b>로 통째로 복사해 보세요. 링크 없이 글만으로도 들일 수 있어요.</p>`}
+      <div class="arl">${links.map((s, i) => s.kind === 'link'
+        ? `<div class="arr off"><span class="dk">${h(s.label)}</span><span class="dp">${h(s.url)}</span><span class="ars">${h(s.why)} — 링크는 보관해요</span></div>`
+        : `<label class="arr"><input type="checkbox" data-i="${i}" checked><span class="dk k-card">${h(s.label)}</span><span class="dp">${h(s.url)}</span><span class="ars" data-s="${i}"></span></label>`).join('')}
+      ${pics.length ? `<label class="arr"><input type="checkbox" id="arPics"><span class="dk">그림</span><span class="dp">글 속 그림 ${pics.length}장 — 카드가 숨어 있는지 하나씩 받아 봐요</span><span class="ars" id="arPicSt"></span></label>` : ''}</div>
+      <div class="row" style="justify-content:flex-end;margin-top:12px"><button class="btn pri" id="arGo">${links.some(s => s.kind !== 'link') || pics.length ? '받아서 살펴보기' : '글만으로 들이기'}</button></div>`;
+    $('#arGo', m).onclick = run;
+  };
+  box.onpaste = e => {
+    const got = pickArticle(e.clipboardData && e.clipboardData.getData('text/html'));
+    if (got) {
+      e.preventDefault();
+      box.focus();
+      document.execCommand('selectAll'); document.execCommand('insertHTML', false, got.html);
+      Object.assign(art, {title: got.title, author: got.author, url: got.url});
+    }
+    setTimeout(draw);
+  };
+  box.oninput = () => { clearTimeout(timer); timer = setTimeout(draw, 400); };
+  const run = async () => {
+    const go = $('#arGo', m);
+    go.disabled = true; box.contentEditable = 'false';
+    $$('#arFound input', m).forEach(i => i.disabled = true);
+    const files = [];  // {file, from}
+    let errs = 0;
+    for (const [i, s] of found.links.entries()) {
+      const cb = $(`[data-i="${i}"]`, m), st = $(`[data-s="${i}"]`, m);
+      if (!cb || !cb.checked) continue;
+      st.textContent = '받는 중…';
+      const prog = (n, t) => st.textContent = `받는 중 ${size(n)}${t ? ` / ${size(t)}` : ''}`;
+      try {
+        const f = s.kind === 'realm' ? (await realmFile(s.url, prog)).file : await grabFile(s.get, prog);
+        const inner = /\.zip$/i.test(f.name) ? await unzipBot(f) : null;
+        (inner || [f]).forEach(file => files.push({file, from: s}));
+        st.textContent = inner ? `✓ zip 안의 ${inner.length}개` : `✓ ${f.name} · ${size(f.size)}`;
+      } catch (e) { st.textContent = '✗ ' + e.message; st.classList.add('bad'); errs++; }
+    }
+    const pc = $('#arPics', m);
+    if (pc && pc.checked) {
+      const st = $('#arPicSt', m);
+      let hit = 0;
+      for (const [i, u] of found.pics.entries()) {
+        st.textContent = `살펴보는 중 ${i + 1}/${found.pics.length}${hit ? ` · 카드 ${hit}` : ''}`;
+        try {
+          const f = await grabFile(u, null, 20000);
+          const c = await readCard(f);
+          if (c && c.info && (c.info.lore != null || c.module)) { hit++; files.push({file: new File([f], `${fileSafe(c.name || '카드')}.${(f.name.match(/\.(png|jpe?g|webp)$/i) || [, 'png'])[1]}`), from: null}); }
+        } catch (e) {}
+      }
+      st.textContent = hit ? `✓ 카드 ${hit}장 찾음` : '카드는 없었어요';
+    }
+    const sorted = await sortFiles(files.map(x => x.file));
+    sorted.forEach((x, i) => { x.from = files[i].from; x.on = x.kind !== 'images'; });  // 카드가 아닌 그림은 빼 둠
+    if (errs && !sorted.length && !await confirmBox('못 받았어요', '링크에서 파일을 하나도 받지 못했어요. 글과 링크만으로 들일까요? 파일은 나중에 봇 페이지에서 올려도 돼요.')) {
+      go.disabled = false; box.contentEditable = 'true'; $$('#arFound input', m).forEach(i => i.disabled = false); return;
+    }
+    arcaStep2(m, {html: box.innerHTML.trim(), hasText: !!box.textContent.trim() || !!box.querySelector('img'), art, links: found.links, files: sorted});
+  };
+}
+async function arcaStep2(m, ctx) {
+  const cards = ctx.files.filter(x => x.kind === 'card'), top = cards[0] && cards[0].card;
+  let cover = top && top.cover || null, status = 'later';
+  const chosen = new Set(), bots = await api('GET', '/api/bots').catch(() => []);
+  const name0 = top && top.name || ctx.art.title || '';
+  $('#addBody', m).innerHTML = `
+    <div class="addtop">
+      <div style="display:flex;flex-direction:column;gap:8px">
+        <div class="cv" id="arCv" style="background:${tint(Date.now() % 8)};width:150px;cursor:pointer" title="표지 바꾸기"></div>
+        <span class="hint">${top && top.info.lore != null ? `로어북 ${top.info.lore} · 에셋 ${top.info.assets}` : cards.length ? '' : '카드 없음'}</span>
+      </div>
+      <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:16px">
+        <div class="row" style="flex-wrap:nowrap;gap:12px">
+          <label class="field" style="flex:1">이름<input class="inp" id="arName" value="${h(name0)}"></label>
+          <label class="field" style="flex:1">만든 사람<input class="inp" id="arWho" value="${h(top && top.creator || ctx.art.author)}"></label>
+        </div>
+        <div class="row" style="flex-wrap:nowrap;gap:12px">
+          <label class="field" style="flex:2">들일 곳<select class="inp" id="arDest"></select></label>
+          <label class="field" style="flex:1">버전 이름<input class="inp" id="arVer" maxlength="40" value="${h(top && top.info.version ? 'v' + top.info.version : '')}" placeholder="비우면 알아서"></label>
+        </div>
+        <div id="arNew">
+          <p class="legend">어느 폴더에 꽂을까요?<span>여러 곳에 같이 넣을 수 있어요</span></p><div class="ftiles" id="arFolders"></div>
+          <div class="field" style="margin-top:14px">지금 상태<div class="seg" id="arStatus">${Object.entries(STATUS).map(([k, v]) => `<button type="button" class="pill" data-s="${k}" aria-pressed="${k === status}">${v}</button>`).join('')}</div></div>
+        </div>
+      </div>
+    </div>
+    <div><p class="legend">받은 파일<span>${ctx.files.length ? '체크한 것만 들여요' : '없음 — 나중에 봇 페이지에서 올려도 돼요'}</span></p>
+      <div class="arl">${ctx.files.map((x, i) => `<label class="arr"><input type="checkbox" data-f="${i}"${x.on ? ' checked' : ''}><span class="dk k-${x.kind}">${h(KIND[x.kind] || x.kind)}</span>
+        <span class="dp">${h(x.file.name)} · ${size(x.file.size)}${x.card ? ' · ' + h(verSum(x.card.info)) : ''}</span><span class="ars">${x.from ? h(x.from.label) : '글 속 그림'}</span></label>`).join('')}</div></div>
+    ${ctx.hasText ? `<div class="row" style="gap:12px;align-items:center"><label class="tog" id="arIntroT" aria-pressed="true"><i></i>붙여넣은 글을 소개글로</label>
+      <input class="inp" id="arTitle" placeholder="글 이름 (탭에 보여요)" value="${h(ctx.art.title)}" style="flex:1;min-width:180px;min-height:40px"></div>` : ''}
+    <div class="prog" id="arProg" hidden><i></i></div>`;
+  m.querySelector('.dlg').insertAdjacentHTML('beforeend', `<footer><span class="note" id="arNote"></span><button class="btn" data-close>취소</button><button class="btn pri" id="arOk">서재에 꽂기</button></footer>`);
+  $('footer [data-close]', m).onclick = m.close;
+  const drawCv = () => { $('#arCv', m).innerHTML = cover ? `<img src="${cover}" alt="">` : `<span class="ph">${h([...($('#arName', m).value || '?')][0])}</span>`; };
+  drawCv();
+  $('#arCv', m).onclick = async () => { const [f] = await pick('image/*'); if (f) { cover = await shrink(f, 900); drawCv(); } };
+  // 서재에 이름이 같은 봇이 있으면 그 봇에 새 버전으로 넣는 걸 먼저 권함
+  const dests = () => {
+    const n = normName($('#arName', m).value), same = n ? bots.filter(b => normName(b.name) === n) : [];
+    const sel = $('#arDest', m), was = sel.value;
+    sel.innerHTML = `<option value="new">새 봇으로</option>${same.map(b => `<option value="${b.id}">서재의 ${h(b.name)}에 새 버전으로</option>`).join('')}`;
+    sel.value = same.some(b => String(b.id) === was) ? was : same.length && was !== 'new' ? String(same[0].id) : 'new';
+    $('#arNew', m).hidden = sel.value !== 'new';
+  };
+  dests();
+  $('#arName', m).addEventListener('change', () => { $('#arDest', m).value = ''; dests(); drawCv(); });
+  $('#arDest', m).onchange = () => { $('#arNew', m).hidden = $('#arDest', m).value !== 'new'; };
+  folderTiles($('#arFolders', m), chosen);
+  $$('#arStatus .pill', m).forEach(b => b.onclick = () => { status = b.dataset.s; $$('#arStatus .pill', m).forEach(x => x.setAttribute('aria-pressed', x === b)); });
+  $$('[data-f]', m).forEach(c => c.onchange = () => { ctx.files[+c.dataset.f].on = c.checked; });
+  let introOn = ctx.hasText;
+  if ($('#arIntroT', m)) $('#arIntroT', m).onclick = e => { introOn = !introOn; e.currentTarget.setAttribute('aria-pressed', introOn); $('#arTitle', m).disabled = !introOn; };
+  $('#arOk', m).onclick = async () => {
+    const btn = $('#arOk', m), note = $('#arNote', m), dest = $('#arDest', m).value;
+    const files = ctx.files.filter(x => x.on), main = (files.find(x => x.kind === 'card') || {}).card;
+    btn.disabled = true;
+    try {
+      let bid;
+      if (dest === 'new') {
+        const b = await api('POST', '/api/bots', {name: $('#arName', m).value.trim() || '이름 없는 봇', creator: $('#arWho', m).value.trim(), status,
+          folders: [...chosen], info: main ? main.info : {}, cover: cover || undefined});
+        bid = b.id;
+      } else bid = +dest;
+      let vid;
+      if (dest === 'new' || files.length) {
+        vid = (await api('POST', '/api/versions', {bot_id: bid, name: $('#arVer', m).value.trim(), info: main ? main.info : {}, current: true})).id;
+      }
+      $('#arProg', m).hidden = false;
+      for (const [i, x] of files.entries()) {
+        note.textContent = `올리는 중 ${i + 1}/${files.length} · ${x.file.name}`;
+        await upload(x.file, {bot: bid, version: vid, kind: x.kind, name: x.file.name}, p => $('#arProg i', m).style.width = ((i + p) / files.length * 100) + '%');
+      }
+      let miss = 0;
+      if (introOn) {
+        note.textContent = '소개글 그림 받는 중…';
+        const d = await api('POST', `/api/bots/${bid}/intro`, {html: ctx.html, version_id: vid, url: ctx.art.url, author: ctx.art.author, title: $('#arTitle', m).value.trim()});
+        miss = d.miss || 0;
+      }
+      // 주요 링크: 아카 글 · 받은 곳 (이미 있는 주소는 건너뜀, 랠름은 하나만)
+      const b = await api('GET', `/api/bots/${bid}`);
+      const has = u => b.links.some(l => l.url === u), want = [];
+      if (ctx.art.url && !has(ctx.art.url)) want.push({url: ctx.art.url, title: '아카 소개글', note: ctx.art.title});
+      for (const s of ctx.links) {
+        if (s.kind === 'realm' ? b.links.some(l => REALM_ID.test(l.url)) || want.some(w => REALM_ID.test(w.url)) : has(s.url)) continue;
+        want.push({url: s.url, title: s.label, note: '아카 글에서 찾음'});
+      }
+      for (const w of want) await api('POST', '/api/links', {bot_id: bid, ...w}).catch(() => {});
+      if (dest !== 'new' && !b.cover && cover) await api('PUT', `/api/bots/${bid}`, {cover}).catch(() => {});
+      m.close();
+      await loadState();
+      location.hash = `#/b/${bid}`;
+      toast(`${b.name}에 ${dest === 'new' ? '들였어요' : '새 버전으로 넣었어요'}${files.length ? ` — 파일 ${files.length}개` : ''}${miss ? ` · 소개글 그림 ${miss}개는 못 가져왔어요` : ''}`);
+    } catch (e) { fail(e); btn.disabled = false; note.textContent = ''; }
+  };
 }
 function dropZone(el, onFiles, onRaw) {
   el.addEventListener('dragover', e => { e.preventDefault(); el.classList.add('over'); });

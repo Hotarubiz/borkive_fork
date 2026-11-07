@@ -21,6 +21,7 @@ API (JSON):
   GET    /api/files/<id>/assets          파일 속 에셋 목록 {sources: [{label, kind c|m, assets}]}
   GET    /api/files/<id>/asset/<n>       카드 에셋 하나   GET /api/files/<id>/masset/<n> 모듈(.risum) 에셋 하나
   GET    /api/realm/<uuid>               (X-BS) 리스 랠름에서 카드 파일을 받아 그대로 넘김 — charx → png → json 순서로 되는 형식
+  GET    /api/grab?u=<주소>              (X-BS) 아카 글 속 링크(드라이브·캐치박스 등)의 파일을 받아 그대로 넘김 — https 공개 주소만, 이름은 X-Name
   POST   /api/bots/<id>/basic            {html, scope: all|ver, version_id} 기본 소개(모든 버전 공통 또는 그 버전 전용, 빈 글이면 지움)
   POST   /api/bots/<id>/intro/fetch      {url, version_id?} 아카라이브 글 가져오기
   POST   /api/versions {bot_id, name, note, released, info, current}   PUT|DELETE /api/versions/<id>
@@ -869,6 +870,34 @@ def fetch(url, limit, referer="https://arca.live/"):
         if len(data) > limit:
             raise ValueError("너무 큼")
         return data, ctype
+
+
+class SafeRedirect(urllib.request.HTTPRedirectHandler):
+    """넘겨주기(redirect)마다 주소를 다시 확인 — 공개 주소에서 내부망으로 돌려보내는 것 막기."""
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        if not safe_remote(newurl):
+            raise ValueError("가져올 수 없는 주소로 넘어가요")
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+GRAB = urllib.request.build_opener(SafeRedirect)
+
+
+def grab_name(r):
+    """받은 파일 이름: Content-Disposition(filename* 먼저) → 주소 끝."""
+    cd = r.headers.get("Content-Disposition") or ""
+    m = re.search(r"filename\*\s*=\s*utf-8''([^;]+)", cd, re.I)
+    if m:
+        name = unquote(m.group(1).strip().strip('"'))
+    else:
+        m = re.search(r'filename\s*=\s*(?:"([^"]+)"|([^;]+))', cd, re.I)
+        name = (m.group(1) or m.group(2)).strip() if m else unquote(urlsplit(r.geturl()).path.rsplit("/", 1)[-1])
+        try:  # http.client는 머리말을 latin-1로 읽음 → 실제로는 UTF-8인 이름 되살리기
+            name = name.encode("latin-1").decode("utf-8")
+        except (UnicodeEncodeError, UnicodeDecodeError):
+            pass
+    name = re.sub(r'[\\/:*?"<>|]|[^\S ]', "_", name).strip(" .")[:120]
+    return name or "file"
 
 
 def grab_media(url):
@@ -2507,25 +2536,52 @@ class Handler(BaseHTTPRequestHandler):
             except (urllib.error.URLError, TimeoutError) as e:
                 return self.send(502, {"error": f"랠름에 연결하지 못했어요: {e}"})
             with r:
-                n = int(r.headers.get("Content-Length") or 0)
-                if n > MAX_FILE:
-                    return self.send(413, {"error": "카드가 너무 커요"})
-                self.send_response(200)
-                self.send_header("Content-Type", "application/octet-stream")
-                self.send_header("X-Ext", ext)
-                if n:
-                    self.send_header("Content-Length", str(n))
-                self.send_header("Cache-Control", "no-store")
-                for k, v in SECURITY_HEADERS.items():
-                    self.send_header(k, v)
-                if not n:  # 길이를 모르면 끝을 연결 끊기로 알림
-                    self.close_connection = True
-                    self.send_header("Connection", "close")
-                self.end_headers()
-                while chunk := r.read(1 << 20):
-                    self.wfile.write(chunk)
-            return
+                return self.pipe(r, {"X-Ext": ext})
         return self.send(403, {"error": last})
+
+    def pipe(self, r, extra):
+        """바깥에서 받는 응답을 메모리에 쌓지 않고 1MB씩 그대로 넘김."""
+        n = int(r.headers.get("Content-Length") or 0)
+        if n > MAX_FILE:
+            return self.send(413, {"error": "파일이 너무 커요"})
+        self.send_response(200)
+        self.send_header("Content-Type", "application/octet-stream")
+        for k, v in extra.items():
+            self.send_header(k, v)
+        if n:
+            self.send_header("Content-Length", str(n))
+        self.send_header("Cache-Control", "no-store")
+        for k, v in SECURITY_HEADERS.items():
+            self.send_header(k, v)
+        if not n:  # 길이를 모르면 끝을 연결 끊기로 알림
+            self.close_connection = True
+            self.send_header("Connection", "close")
+        self.end_headers()
+        while chunk := r.read(1 << 20):
+            self.wfile.write(chunk)
+
+    def relay_grab(self, url):
+        """아카 글에서 찾은 링크의 파일 받기 — https 공개 주소만(넘겨주기도 매번 확인), 파일 대신 웹 페이지가 오면 거절."""
+        url = (url or "").strip()
+        if not safe_remote(url):
+            return self.send(400, {"error": "받을 수 없는 주소예요 (https 공개 주소만)"})
+        hd = {"User-Agent": UA, "Accept-Language": "ko-KR,ko;q=0.9"}
+        if (urlsplit(url).hostname or "").endswith("namu.la"):  # 아카 그림은 아카에서 연 것처럼
+            hd["Referer"] = "https://arca.live/"
+        try:
+            r = GRAB.open(urllib.request.Request(url, headers=hd), timeout=30)
+        except urllib.error.HTTPError as e:
+            return self.send(502, {"error": {401: "로그인해야 받을 수 있는 링크예요", 403: "그쪽에서 내려받기를 막았어요 (비공개·로그인 필요·만료)",
+                                             404: "파일이 없어요 (지워졌거나 주소가 바뀜)", 410: "만료된 링크예요"}.get(e.code, f"그쪽 서버가 {e.code}로 거절했어요")})
+        except ValueError as e:
+            return self.send(400, {"error": str(e)})
+        except (urllib.error.URLError, TimeoutError, OSError) as e:
+            return self.send(502, {"error": f"연결하지 못했어요: {e}"})
+        with r:
+            ctype = (r.headers.get("Content-Type") or "").split(";")[0].strip().lower()
+            if ctype in ("text/html", "application/xhtml+xml"):
+                return self.send(415, {"error": "파일 대신 웹 페이지가 왔어요 — 로그인·확인 단계가 있는 링크라 직접 받아야 해요"})
+            return self.pipe(r, {"X-Name": quote(grab_name(r))})
 
     def send_mod_asset(self, fname, i):
         at = risum_assets_at(fname)
@@ -2787,6 +2843,10 @@ class Handler(BaseHTTPRequestHandler):
                 if not self.write_ok():  # 바깥으로 나가는 요청이라 앱에서 부른 것만
                     return
                 return self.relay_realm(p[1])
+            if p == ["grab"]:
+                if not self.write_ok():
+                    return
+                return self.relay_grab(params.get("u"))
             if p == ["health"]:
                 return self.send(200, {"ok": True, "bots": db.q("SELECT COUNT(*) AS n FROM bots")[0]["n"], "chats": db.q("SELECT COUNT(*) AS n FROM chats")[0]["n"]})
             if p == ["stats"]:
