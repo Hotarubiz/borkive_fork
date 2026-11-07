@@ -653,6 +653,7 @@ img.emo{display:block;max-width:min(300px,100%);max-height:380px;width:auto;marg
 .arr .dp{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--ink2)}
 .ars{color:var(--mute);font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .ars:empty{display:none}
+.arr .arpw{grid-column:2/-1;width:auto;min-height:34px;font-size:13px}
 .ars.bad{color:var(--red)}
 @media (max-width:700px){#addSub{display:none}.arr{grid-template-columns:auto auto minmax(0,1fr)}.arr.off{grid-template-columns:auto minmax(0,1fr)}.ars{grid-column:1/-1;white-space:normal}}
 .dierr p{margin:4px 0 0;font-size:12.5px;color:var(--mute)}
@@ -1688,7 +1689,10 @@ function linkSource(raw) {
   }
   if (/(^|\.)dropbox\.com$/.test(host) && /^\/(s|scl)\//.test(path)) { x.searchParams.set('dl', '1'); return {kind: 'file', label: '드롭박스', url: u, get: x.href}; }
   if (host === 'pixeldrain.com' && (m = path.match(/^\/u\/(\w+)/))) return {kind: 'file', label: '픽셀드레인', url: u, get: `https://pixeldrain.com/api/file/${m[1]}?download`};
-  if (/^mega\.(nz|io|co\.nz)$/.test(host)) return {kind: 'link', label: 'MEGA', url: u, why: '메가는 암호가 걸려 있어 직접 받아야 해요'};
+  if (/^mega\.(nz|io|co\.nz)$/.test(host)) return MEGA_FILE.test(u) ? {kind: 'mega', label: 'MEGA', url: u}
+    : {kind: 'link', label: 'MEGA', url: u, why: /\/folder\//.test(path) ? '메가 폴더 링크라 직접 받아야 해요' : '푸는 열쇠(# 뒤)가 빠진 링크예요'};
+  if (host === 'drive.proton.me' && /^\/urls\/\w+/.test(path)) return x.hash.length > 1 ? {kind: 'proton', label: '프로톤 드라이브', url: u}
+    : {kind: 'link', label: '프로톤 드라이브', url: u, why: '암호(# 뒤)가 빠진 링크예요'};
   if (host === 'github.com' && (m = path.match(/^\/([^/]+\/[^/]+)\/blob\/(.+)$/))) return {kind: 'file', label: '깃허브', url: u, get: `https://raw.githubusercontent.com/${m[1]}/${m[2]}`};
   if (/^(chub\.ai|characterhub\.org)$/.test(host) && (m = path.match(/^\/characters\/([^/]+\/[^/?#]+)/))) return {kind: 'file', label: 'chub', url: u, get: `https://avatars.charhub.io/avatars/${m[1]}/chara_card_v2.png`};
   if (BOT_EXT.test(path)) return {kind: 'file', label: host, url: u, get: x.href.replace(/^http:/, 'https:')};
@@ -1722,6 +1726,75 @@ async function grabFile(url, onProg, stall = 60000) {
     throw e.name === 'AbortError' ? new Error('답이 없어서 그만뒀어요') : e;
   } finally { clearTimeout(timer); }
 }
+// ---- 메가 공개 파일: 링크 # 뒤 열쇠로 브라우저에서 풂 (서버는 받을 주소만 물어 옴) ----
+const MEGA_FILE = /mega\.(?:nz|io|co\.nz)\/(?:file\/([\w-]{8})#([\w-]{43})|#!([\w-]{8})!([\w-]{43}))/;
+const b64u = s => Uint8Array.from(atob(s.replace(/-/g, '+').replace(/_/g, '/') + '='.repeat((4 - s.length % 4) % 4)), c => c.charCodeAt(0));
+// 메가 이름은 AES-CBC + 0으로 채움 → 웹 암호화는 PKCS7만 받으니 맞는 채움 블록을 하나 만들어 붙이고 풂
+async function cbcNoPad(k, data) {
+  const key = await crypto.subtle.importKey('raw', k, 'AES-CBC', false, ['encrypt', 'decrypt']);
+  const pad = new Uint8Array(await crypto.subtle.encrypt({name: 'AES-CBC', iv: data.slice(-16)}, key, new Uint8Array(16).fill(16))).slice(0, 16);
+  const all = new Uint8Array(data.length + 16);
+  all.set(data); all.set(pad, data.length);
+  return new Uint8Array(await crypto.subtle.decrypt({name: 'AES-CBC', iv: new Uint8Array(16)}, key, all));
+}
+async function megaFile(url, onProg) {
+  const m = String(url).match(MEGA_FILE);
+  if (!m) throw new Error('메가 파일 링크(mega.nz/file/…#열쇠)만 받을 수 있어요');
+  const key = b64u(m[2] || m[4]);
+  if (key.length !== 32) throw new Error('메가 열쇠가 깨졌어요');
+  const k = key.slice(0, 16).map((b, i) => b ^ key[i + 16]), iv = new Uint8Array(16);
+  iv.set(key.slice(16, 24));
+  const r = await fetch(`/api/mega/${m[1] || m[3]}`, {headers: {'X-BS': '1'}});
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.error || `메가에서 못 받았어요 (${r.status})`);
+  let name = 'mega-file';
+  try {
+    const t = new TextDecoder().decode(await cbcNoPad(k, b64u(d.at))).replace(/\0+$/, '');
+    if (t.startsWith('MEGA')) name = JSON.parse(t.slice(4)).n || name;
+  } catch (e) {}
+  const enc = await grabFile(d.g, onProg);
+  const ck = await crypto.subtle.importKey('raw', k, 'AES-CTR', false, ['decrypt']);
+  return new File([await crypto.subtle.decrypt({name: 'AES-CTR', counter: iv, length: 64}, ck, await enc.arrayBuffer())], name);
+}
+// ---- 프로톤 드라이브 공개 링크: 프로톤 SDK 묶음(/proton.js)을 그때 불러와 브라우저에서 풂, 프로톤 API 요청은 서버가 대신 보냄 ----
+let protonLib = null;
+const loadProton = () => protonLib || (protonLib = new Promise((ok, no) => {
+  const s = document.createElement('script');
+  s.src = '/proton.js';
+  s.onload = () => window.BKProton ? ok(window.BKProton) : no(new Error('프로톤 받기 도구가 이상해요'));
+  s.onerror = () => { protonLib = null; no(new Error('프로톤 받기 도구를 못 불러왔어요')); };
+  document.head.append(s);
+}));
+const toB64 = u8 => { let s = ''; for (let i = 0; i < u8.length; i += 0x8000) s += String.fromCharCode(...u8.subarray(i, i + 0x8000)); return btoa(s); };
+async function protonRelay(req, appVersion) {
+  const headers = {};
+  req.headers.forEach((v, k) => { headers[k] = v; });
+  headers['x-pm-appversion'] = appVersion;
+  let body = null;
+  if (req.json) { headers['content-type'] = 'application/json'; body = new TextEncoder().encode(JSON.stringify(req.json)); }
+  else if (req.body) body = new Uint8Array(await new Response(req.body).arrayBuffer());
+  const signal = req.timeoutMs > 0 ? (req.signal ? AbortSignal.any([req.signal, AbortSignal.timeout(req.timeoutMs)]) : AbortSignal.timeout(req.timeoutMs)) : req.signal;
+  const r = await fetch('/api/proton', {method: 'POST', signal, headers: {'X-BS': '1', 'Content-Type': 'application/json'},
+    body: JSON.stringify({url: req.url, method: req.method, headers, body: body ? toB64(body) : ''})});
+  if (!r.headers.get('X-Proton')) { const d = await r.json().catch(() => ({})); throw new Error(d.error || `프로톤에 못 보냈어요 (${r.status})`); }
+  return new Response([101, 204, 205, 304].includes(r.status) ? null : r.body, {status: r.status, headers: {'content-type': r.headers.get('content-type') || ''}});
+}
+// 프로톤 링크 → File 목록 (폴더면 안의 파일 전부, 하위 폴더 3단계까지)
+async function protonFiles(url, password, st) {
+  const lib = await loadProton();
+  st('프로톤 링크 여는 중…');
+  let list;
+  try { list = await lib.open(url, password, protonRelay); } catch (e) {
+    throw e.needPassword ? new Error(password ? '암호가 틀렸어요' : '암호가 걸린 링크예요 — 옆 칸에 암호를 넣고 다시 해 주세요') : e;
+  }
+  const out = [];
+  for (const [i, x] of list.entries()) {
+    const label = `받는 중 ${i + 1}/${list.length} · ${x.name}`;
+    st(label);
+    out.push(await x.get((n, t) => st(`${label} ${size(n)}${t ? ` / ${size(t)}` : ''}`)));
+  }
+  return out;
+}
 // 받은 .zip 안의 봇 파일 → File 목록 (봇 파일이 없으면 null — zip 그대로 둠)
 async function unzipBot(file) {
   let list;
@@ -1737,7 +1810,7 @@ function arcaPane(m, pane) {
   pane.innerHTML = `
     <div class="paste apaste" id="arPaste" contenteditable="true" data-ph="아카 글을 여기에 붙여넣기 (Ctrl+V)"></div>
     <p class="hint" style="margin:0">아카 글 화면에서 <b>Ctrl+A → Ctrl+C</b>로 통째로 복사해 붙여넣으면 본문만 골라요(접힌 곳까지는 <a class="bmk" id="arBmk" href="${h(BOOKMARKLET)}">📋 아카 본문 복사</a> 북마크로).
-      글 속 랠름·구글 드라이브·드롭박스·픽셀드레인·깃허브 링크와 카드 파일 링크를 찾아 받고, 붙여넣은 글은 소개글로 같이 보관해요.</p>
+      글 속 랠름·프로톤 드라이브·메가·구글 드라이브·드롭박스·픽셀드레인·깃허브 링크와 카드 파일 링크를 찾아 받고, 붙여넣은 글은 소개글로 같이 보관해요.</p>
     <div id="arFound"></div>`;
   $('#arBmk', m).onclick = e => { e.preventDefault(); toast('이 단추를 북마크바로 끌어다 놓은 뒤, 아카 글 화면에서 눌러 주세요'); };
   const box = $('#arPaste', m);
@@ -1751,7 +1824,8 @@ function arcaPane(m, pane) {
       ${links.length || pics.length ? '' : `<p class="hint">받을 링크를 못 찾았어요. 드래그해서 복사하면 링크 주소가 빠질 수 있으니 <b>Ctrl+A</b>로 통째로 복사해 보세요. 링크 없이 글만으로도 들일 수 있어요.</p>`}
       <div class="arl">${links.map((s, i) => s.kind === 'link'
         ? `<div class="arr off"><span class="dk">${h(s.label)}</span><span class="dp">${h(s.url)}</span><span class="ars">${h(s.why)} — 링크는 보관해요</span></div>`
-        : `<label class="arr"><input type="checkbox" data-i="${i}" checked><span class="dk k-card">${h(s.label)}</span><span class="dp">${h(s.url)}</span><span class="ars" data-s="${i}"></span></label>`).join('')}
+        : `<label class="arr"><input type="checkbox" data-i="${i}" checked><span class="dk k-card">${h(s.label)}</span><span class="dp">${h(s.url)}</span><span class="ars" data-s="${i}"></span>${s.kind === 'proton'
+          ? `<input class="inp arpw" data-pw="${i}" placeholder="링크에 따로 건 암호 (있으면)" autocomplete="off">` : ''}</label>`).join('')}
       ${pics.length ? `<label class="arr"><input type="checkbox" id="arPics"><span class="dk">그림</span><span class="dp">글 속 그림 ${pics.length}장 — 카드가 숨어 있는지 하나씩 받아 봐요</span><span class="ars" id="arPicSt"></span></label>` : ''}</div>
       <div class="row" style="justify-content:flex-end;margin-top:12px"><button class="btn pri" id="arGo">${links.some(s => s.kind !== 'link') || pics.length ? '받아서 살펴보기' : '글만으로 들이기'}</button></div>`;
     $('#arGo', m).onclick = run;
@@ -1779,10 +1853,14 @@ function arcaPane(m, pane) {
       st.textContent = '받는 중…';
       const prog = (n, t) => st.textContent = `받는 중 ${size(n)}${t ? ` / ${size(t)}` : ''}`;
       try {
-        const f = s.kind === 'realm' ? (await realmFile(s.url, prog)).file : await grabFile(s.get, prog);
-        const inner = /\.zip$/i.test(f.name) ? await unzipBot(f) : null;
-        (inner || [f]).forEach(file => files.push({file, from: s}));
-        st.textContent = inner ? `✓ zip 안의 ${inner.length}개` : `✓ ${f.name} · ${size(f.size)}`;
+        const got = s.kind === 'proton' ? await protonFiles(s.url, ($(`[data-pw="${i}"]`, m) || {}).value || '', t => st.textContent = t)
+          : [s.kind === 'realm' ? (await realmFile(s.url, prog)).file : s.kind === 'mega' ? await megaFile(s.url, prog) : await grabFile(s.get, prog)];
+        let n = 0;
+        for (const f of got) {
+          const inner = /\.zip$/i.test(f.name) ? await unzipBot(f) : null;
+          (inner || [f]).forEach(file => { files.push({file, from: s}); n++; });
+        }
+        st.textContent = got.length === 1 && n === 1 ? `✓ ${got[0].name} · ${size(got[0].size)}` : `✓ 파일 ${n}개`;
       } catch (e) { st.textContent = '✗ ' + e.message; st.classList.add('bad'); errs++; }
     }
     const pc = $('#arPics', m);

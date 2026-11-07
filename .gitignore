@@ -8,3 +8,5 @@ __pycache__/
 *.pyc
 .DS_Store
 Thumbs.db
+
+tools/proton/node_modules/

@@ -22,6 +22,9 @@ API (JSON):
   GET    /api/files/<id>/asset/<n>       카드 에셋 하나   GET /api/files/<id>/masset/<n> 모듈(.risum) 에셋 하나
   GET    /api/realm/<uuid>               (X-BS) 리스 랠름에서 카드 파일을 받아 그대로 넘김 — charx → png → json 순서로 되는 형식
   GET    /api/grab?u=<주소>              (X-BS) 아카 글 속 링크(드라이브·캐치박스 등)의 파일을 받아 그대로 넘김 — https 공개 주소만, 이름은 X-Name
+  POST   /api/proton {url, method, headers, body(base64)}   프로톤 드라이브 공개 링크용 — *.proton.me로만 대신 보내고 답을 그대로(X-Proton: 1).
+         푸는 일은 브라우저의 /proton.js(프로톤 SDK 묶음, tools/proton)가 함
+  GET    /api/mega/<파일 id>             (X-BS) 메가 공개 파일의 받을 주소·크기·암호화된 이름 (푸는 건 브라우저)
   POST   /api/bots/<id>/basic            {html, scope: all|ver, version_id} 기본 소개(모든 버전 공통 또는 그 버전 전용, 빈 글이면 지움)
   POST   /api/bots/<id>/intro/fetch      {url, version_id?} 아카라이브 글 가져오기
   POST   /api/versions {bot_id, name, note, released, info, current}   PUT|DELETE /api/versions/<id>
@@ -881,6 +884,7 @@ class SafeRedirect(urllib.request.HTTPRedirectHandler):
 
 
 GRAB = urllib.request.build_opener(SafeRedirect)
+PROTON_HOST = re.compile(r"(?:[a-z0-9-]+\.)*proton\.me", re.I)
 
 
 def grab_name(r):
@@ -2560,6 +2564,60 @@ class Handler(BaseHTTPRequestHandler):
         while chunk := r.read(1 << 20):
             self.wfile.write(chunk)
 
+    def relay_proton(self, d):
+        """프로톤 드라이브 공개 링크 — 브라우저의 프로톤 SDK(app/proton.js)가 만든 요청을 프로톤 주소로만 대신 보내고 답을 그대로 넘김."""
+        url = str(d.get("url") or "")
+        p = urlsplit(url)
+        method = str(d.get("method") or "GET").upper()
+        if p.scheme != "https" or not PROTON_HOST.fullmatch(p.hostname or "") or method not in ("GET", "POST", "PUT", "DELETE"):
+            return self.send(400, {"error": "프로톤 주소만 보낼 수 있어요"})
+        hd = {k: str(v) for k, v in (d.get("headers") or {}).items() if re.match(r"(x-pm-|pm-|authorization$|content-type$|accept$)", str(k), re.I)}
+        hd["User-Agent"] = UA
+        try:
+            body = base64.b64decode(d["body"]) if d.get("body") else None
+        except ValueError:
+            return self.send(400, {"error": "보낼 내용이 깨졌어요"})
+        try:
+            r = GRAB.open(urllib.request.Request(url, data=body, method=method, headers=hd), timeout=60)
+        except urllib.error.HTTPError as e:
+            r = e  # 프로톤의 오류 답(JSON)도 그대로 넘겨야 SDK가 알아봄
+        except ValueError as e:
+            return self.send(400, {"error": str(e)})
+        except (urllib.error.URLError, TimeoutError, OSError) as e:
+            return self.send(502, {"error": f"프로톤에 연결하지 못했어요: {e}"})
+        with r:
+            n = r.headers.get("Content-Length")
+            self.send_response(r.status)
+            self.send_header("Content-Type", r.headers.get("Content-Type") or "application/octet-stream")
+            self.send_header("X-Proton", "1")
+            self.send_header("Cache-Control", "no-store")
+            for k, v in SECURITY_HEADERS.items():
+                self.send_header(k, v)
+            if n:
+                self.send_header("Content-Length", n)
+            else:
+                self.close_connection = True
+                self.send_header("Connection", "close")
+            self.end_headers()
+            while chunk := r.read(1 << 20):
+                self.wfile.write(chunk)
+
+    def mega_info(self, fid):
+        """메가 공개 파일 링크 → {g: 받을 주소(https), s: 크기, at: 암호화된 이름}. 푸는 열쇠(링크 # 뒤)는 서버로 안 옴 — 브라우저가 풂."""
+        if not re.fullmatch(r"[\w-]{8}", fid):
+            return self.send(400, {"error": "메가 파일 링크가 아니에요"})
+        req = urllib.request.Request("https://g.api.mega.co.nz/cs?id=0", data=json.dumps([{"a": "g", "g": 1, "ssl": 1, "p": fid}]).encode(),
+                                     headers={"User-Agent": UA, "Content-Type": "application/json"})
+        try:
+            with urllib.request.urlopen(req, timeout=20) as r:
+                d = json.loads(r.read(100_000))
+        except (OSError, ValueError) as e:
+            return self.send(502, {"error": f"메가에 연결하지 못했어요: {e}"})
+        d = d[0] if isinstance(d, list) and d else d
+        if not isinstance(d, dict) or not d.get("g"):
+            return self.send(404, {"error": "메가에서 파일을 찾지 못했어요 (지워졌거나 막힘)" if d in (-9, -2, -16) or isinstance(d, int) else "메가 답을 못 알아봤어요"})
+        return self.send(200, {"g": str(d["g"]).replace("http://", "https://", 1), "s": d.get("s") or 0, "at": d.get("at") or ""})
+
     def relay_grab(self, url):
         """아카 글에서 찾은 링크의 파일 받기 — https 공개 주소만(넘겨주기도 매번 확인), 파일 대신 웹 페이지가 오면 거절."""
         url = (url or "").strip()
@@ -2829,6 +2887,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send(200, {"ok": True, "locked": True})
             if not self.gate():
                 return
+            if parts == ["proton.js"]:  # 프로톤 링크를 받을 때만 불러옴 (tools/proton에서 만듦)
+                return self.send(200, (APP / "proton.js").read_bytes(), "text/javascript; charset=utf-8", "no-cache")
             if parts[0] == "m" and len(parts) == 2 and re.fullmatch(MEDIA_RE, parts[1]):
                 return self.send_file(MEDIA / parts[1], CTYPES[parts[1].rsplit(".", 1)[1]])
             if parts[0] == "f" and len(parts) == 2 and re.fullmatch(FILE_RE, parts[1]):
@@ -2847,6 +2907,10 @@ class Handler(BaseHTTPRequestHandler):
                 if not self.write_ok():
                     return
                 return self.relay_grab(params.get("u"))
+            if len(p) == 2 and p[0] == "mega":
+                if not self.write_ok():
+                    return
+                return self.mega_info(p[1])
             if p == ["health"]:
                 return self.send(200, {"ok": True, "bots": db.q("SELECT COUNT(*) AS n FROM bots")[0]["n"], "chats": db.q("SELECT COUNT(*) AS n FROM chats")[0]["n"]})
             if p == ["stats"]:
@@ -2966,6 +3030,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self.auth_post(p, d)
             if not self.gate():
                 return
+            if p == ["proton"]:
+                return self.relay_proton(d)
             if p == ["styles"]:
                 return self.send(200, style_detail(new_style(d)))
             if len(p) == 3 and p[0] == "bots" and p[1].isdigit() and p[2] == "images":  # {image(data URL), chat_id, idx, memo}
