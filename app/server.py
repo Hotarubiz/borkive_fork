@@ -456,8 +456,10 @@ def clean(data, fields):
 
 
 def file_unfiled(conn, bot_id=None):
-    """폴더 없는 봇을 '받은 봇'에 넣고 그 봇 id를 돌려줘요. 폴더가 없어졌으면 이때 다시 만들어요. 자료함 자료는 그대로예요."""
-    sql = "SELECT b.id FROM bots b WHERE COALESCE(b.itype, '')='' AND NOT EXISTS (SELECT 1 FROM bot_folders x WHERE x.bot_id=b.id)"
+    """폴더 없는 봇을 '받은 봇'에 넣고 그 봇 id를 돌려줘요. 폴더가 없어졌으면 이때 다시 만들어요.
+    자료함 자료는 그대로예요. 정리 전(inbox) 봇은 폴더를 고를 때까지 기다리고, 정리 끝인데 폴더가 없으면 그때 넣어요."""
+    sql = ("SELECT b.id FROM bots b WHERE COALESCE(b.itype, '')='' AND COALESCE(b.inbox, 0)=0"
+           " AND NOT EXISTS (SELECT 1 FROM bot_folders x WHERE x.bot_id=b.id)")
     ids = [r[0] for r in conn.execute(sql + " AND b.id=?", (bot_id,))] if bot_id else [r[0] for r in conn.execute(sql)]
     if not ids:
         return ids
@@ -3509,6 +3511,8 @@ class Handler(BaseHTTPRequestHandler):
                     self.gc_intro(f"/m/{b[0]['cover']}")
                 if isinstance(d.get("folders"), list):
                     set_folders(bid, d["folders"])
+                elif "inbox" in vals:  # 폴더 없이 정리 끝으로 하면 '받은 봇'으로
+                    file_unfiled_bots(bid)
                 if "persona_id" in d:  # 기본 페르소나 (null = 없음), fill_chats면 지정 안 한 로그에도 붙임
                     pid = persona_ok(d["persona_id"])
                     db.x("UPDATE bots SET persona_id=? WHERE id=?", (pid, bid))
