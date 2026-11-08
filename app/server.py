@@ -12,19 +12,27 @@ API (JSON):
   GET    /api/state                      폴더·자료함 칸·개수
   GET    /api/bots?folder=&status=       봇 목록(요약)     POST /api/bots
   GET    /api/bots/<id>                  봇 + 폴더 + 링크 + 파일 + 채팅 목록
-  PUT    /api/bots/<id>   DELETE /api/bots/<id>
+  PUT    /api/bots/<id>   DELETE /api/bots/<id>     (inbox = 정리 전 — 폴더를 넣으면 inbox를 안 보내도 정리 끝)
   POST   /api/bots/<id>/intro            {html, version_id?, intro_id?, title?, url?, author?} 붙여넣은 소개글을 그 버전(기본 지금 버전)에
                                          새 글로 저장, intro_id가 있으면 그 글을 바꿈(그림은 받아서 보관)
   PUT    /api/intros/<id>                {title} 글 이름   DELETE /api/intros/<id>
+  POST   /api/articles                   {owner: pgroup|style, owner_id, article_id?, html, title?, url?, author?} 페르소나 폴더·그림체에 붙여넣은 아카 글
+                                         (article_id면 그 글을 바꿈)   PUT /api/articles/<id> {title}   DELETE /api/articles/<id>
   PUT    /api/series                     {bot_id, name, ids?: [채팅 id], from?: 예전 시리즈 이름} 채팅을 시리즈로 묶기·이름 바꾸기·풀기(name '')
   GET    /api/files/<id>/lore            카드·모듈 파일 속 로어북 {sources: [{label, entries}]} (charx 속 module.risum, .risum까지)
   GET    /api/files/<id>/assets          파일 속 에셋 목록 {sources: [{label, kind c|m, assets}]}
   GET    /api/files/<id>/asset/<n>       카드 에셋 하나   GET /api/files/<id>/masset/<n> 모듈(.risum) 에셋 하나
   GET    /api/realm/<uuid>               (X-BS) 리스 랠름에서 카드 파일을 받아 그대로 넘김 — charx → png → json 순서로 되는 형식
+  GET    /api/grab?u=<주소>              (X-BS) 아카 글 속 링크(드라이브·캐치박스 등)의 파일을 받아 그대로 넘김 — https 공개 주소만, 이름은 X-Name
+  POST   /api/proton {url, method, headers, body(base64)}   프로톤 드라이브 공개 링크용 — *.proton.me로만 대신 보내고 답을 그대로(X-Proton: 1).
+         푸는 일은 브라우저의 /proton.js(프로톤 SDK 묶음, tools/proton)가 함
+  GET    /api/mega/<파일 id>             (X-BS) 메가 공개 파일의 받을 주소·크기·암호화된 이름 (푸는 건 브라우저)
   POST   /api/bots/<id>/basic            {html, scope: all|ver, version_id} 기본 소개(모든 버전 공통 또는 그 버전 전용, 빈 글이면 지움)
   POST   /api/bots/<id>/intro/fetch      {url, version_id?} 아카라이브 글 가져오기
   POST   /api/versions {bot_id, name, note, released, info, current}   PUT|DELETE /api/versions/<id>
+  PUT    /api/bots/<id>/versions/order {ids: [위 → 아래]}   버전 순서 (새 버전은 맨 위로)
          버전 = 업데이트 하나(카드·모듈·소개글 묶음). 버전 없는 봇 자료는 공통 자료.
+  PUT    /api/folders/order {ids}        폴더 순서 (보낸 순서대로)
   POST   /api/folders  PUT|DELETE /api/folders/<id>      POST /api/shelves  PUT|DELETE /api/shelves/<id>
   POST   /api/links    PUT|DELETE /api/links/<id>
   POST   /api/statuses {name, color}   PUT|DELETE /api/statuses/<key>   봇 상태 (기본 3개는 이름·색만, 더한 건 지우기도 — 지우면 그 봇은 '찜'으로)
@@ -141,7 +149,7 @@ CSP = ("default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 
        "font-src https://fonts.gstatic.com https://cdn.jsdelivr.net https://hangeul.pstatic.net; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self'; "
        "frame-ancestors 'none'; base-uri 'none'; form-action 'none'")
 
-BOT_FIELDS = {"name": str, "creator": str, "status": str, "itype": str, "in_risu": bool, "memo": str, "info": dict,
+BOT_FIELDS = {"name": str, "creator": str, "status": str, "itype": str, "in_risu": bool, "inbox": bool, "memo": str, "info": dict,
               "intro_url": str, "intro_title": str, "intro_author": str}
 JSON_COLS = {"info"}
 
@@ -194,6 +202,9 @@ CREATE TABLE IF NOT EXISTS intros (
   id INTEGER PRIMARY KEY AUTOINCREMENT, version_id INTEGER REFERENCES versions(id) ON DELETE CASCADE,
   title TEXT DEFAULT '', html TEXT DEFAULT '', url TEXT DEFAULT '', author TEXT DEFAULT '', at TEXT, sort INTEGER DEFAULT 0);
 CREATE INDEX IF NOT EXISTS intros_ver ON intros(version_id);
+CREATE TABLE IF NOT EXISTS articles (id INTEGER PRIMARY KEY AUTOINCREMENT, owner TEXT NOT NULL, owner_id INTEGER NOT NULL,
+  title TEXT DEFAULT '', html TEXT DEFAULT '', url TEXT DEFAULT '', author TEXT DEFAULT '', at TEXT, sort INTEGER DEFAULT 0);
+CREATE INDEX IF NOT EXISTS articles_owner ON articles(owner, owner_id);
 CREATE TABLE IF NOT EXISTS personas (
   id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, image TEXT, prompt TEXT DEFAULT '', memo TEXT DEFAULT '',
   module TEXT, module_name TEXT, module_size INTEGER, created TEXT, updated TEXT, opened TEXT);
@@ -299,6 +310,10 @@ class DB:
                 self.c.execute("INSERT INTO statuses(key, name, color, sort, builtin) VALUES (?,?,?,?,1)", (k, n, col, i))
             if self.c.execute("SELECT 1 FROM bots WHERE status='archived' LIMIT 1").fetchone():  # 예전 '보관'에 둔 봇이 있으면 더한 상태로 남김
                 self.c.execute("INSERT INTO statuses(key, name, color, sort) VALUES ('archived','보관','#C7C5CC',3)")
+        if "sort" not in [r["name"] for r in self.c.execute("PRAGMA table_info(versions)")]:  # 버전 순서 (0 = 직접 안 정함 → 넣은 때 순서)
+            self.c.execute("ALTER TABLE versions ADD COLUMN sort INTEGER DEFAULT 0")
+        if "inbox" not in [r["name"] for r in self.c.execute("PRAGMA table_info(bots)")]:  # 정리 전 (폴더째 들인 뒤 아직 분류 안 한 봇)
+            self.c.execute("ALTER TABLE bots ADD COLUMN inbox INTEGER DEFAULT 0")
         if "itype" not in [r["name"] for r in self.c.execute("PRAGMA table_info(bots)")]:  # 자료함 자료 (''이면 봇)
             self.c.execute("ALTER TABLE bots ADD COLUMN itype TEXT DEFAULT ''")
         if "scope" not in [r["name"] for r in self.c.execute("PRAGMA table_info(folders)")]:  # 서재 폴더(bot) · 자료함 폴더(item)
@@ -411,8 +426,9 @@ def row(r):
             d[k] = json.loads(d[k] or "{}")
         except ValueError:
             d[k] = {}
-    if "in_risu" in d:
-        d["in_risu"] = bool(d["in_risu"])
+    for k in ("in_risu", "inbox"):
+        if k in d:
+            d[k] = bool(d[k])
     if "current" in d:
         d["current"] = bool(d["current"])
     return d
@@ -478,6 +494,39 @@ def save_data_url(data_url):
     name = f"{secrets.token_hex(10)}.{ {'jpeg': 'jpg'}.get(m.group(1), m.group(1))}"
     (MEDIA / name).write_bytes(raw)
     return name
+
+
+def gc_intro(old_html):
+    """예전 소개글에만 있던 그림 파일 정리 (다른 소개글·아카 글·표지·장면이 쓰면 남김)."""
+    for n in set(intro_media(old_html)):
+        like = f"%/m/{n}%"
+        used = db.q("""SELECT 1 FROM bots WHERE intro_html LIKE ? OR basic LIKE ? OR cover=?
+                       UNION SELECT 1 FROM versions WHERE intro_html LIKE ? OR basic LIKE ?
+                       UNION SELECT 1 FROM intros WHERE html LIKE ? UNION SELECT 1 FROM articles WHERE html LIKE ?
+                       UNION SELECT 1 FROM marks WHERE image=? UNION SELECT 1 FROM bimages WHERE image=? LIMIT 1""",
+                    (like, like, n, like, like, like, like, n, n))
+        if not used:
+            drop_media(n)
+
+
+# ---- 아카 글: 페르소나 폴더·그림체에 붙이는 글 (봇은 버전마다 intros) ----
+ARTICLE_OWNERS = {"pgroup": "pgroups", "style": "styles"}
+
+
+def article_rows(owner, oid):
+    return db.q("SELECT id, title, html, url, author, at FROM articles WHERE owner=? AND owner_id=? ORDER BY sort, id", (owner, oid))
+
+
+def drop_articles(owner, oid):
+    old = "".join(r["html"] or "" for r in db.q("SELECT html FROM articles WHERE owner=? AND owner_id=?", (owner, oid)))
+    db.x("DELETE FROM articles WHERE owner=? AND owner_id=?", (owner, oid))
+    gc_intro(old)
+
+
+def add_article(owner, oid, title, html, url, author, at):
+    n = db.q("SELECT COALESCE(MAX(sort), 0) + 1 AS n FROM articles WHERE owner=? AND owner_id=?", (owner, oid))[0]["n"]
+    return db.x("INSERT INTO articles(owner, owner_id, title, html, url, author, at, sort) VALUES (?,?,?,?,?,?,?,?)",
+                (owner, oid, title[:300], html, url[:300], author[:100], at, n))[0]
 
 
 def drop_media(*names):
@@ -695,7 +744,7 @@ def info_text(bid, vdir=None, fnames=None):
         lines += ["", "메모", b["memo"].strip()]
     files = db.q("SELECT id, name, path, version_id FROM files WHERE bot_id=? ORDER BY created, id", (bid,))
     fname = lambda f: fnames.get(f["id"], f["name"]) if fnames else f["path"].rsplit("/", 1)[-1] if f["path"] else (f["name"] or "file")
-    vers = db.q("SELECT id, name, released, current FROM versions WHERE bot_id=? ORDER BY created, id", (bid,))
+    vers = db.q("SELECT id, name, released, current FROM versions WHERE bot_id=? ORDER BY sort, created, id", (bid,))
     if vers:
         lines += ["", "버전"]
     for v in vers:
@@ -795,6 +844,9 @@ def pick_src(a):
     return abs_url(src)
 
 
+ARCA_MEDIA = re.compile(r"ac[\w-]*\.arca\.live|(?:[\w-]+\.)*namu\.la", re.I)
+
+
 class Cleaner(HTMLParser):
     """허용한 태그·속성만 남김. 모르는 태그는 벗겨 내고 글자는 남긴다. src는 fix(url)로 바꿔 끼움(None이면 그림 빼기)."""
 
@@ -823,7 +875,7 @@ class Cleaner(HTMLParser):
             keep.append(("style", style))
         if tag == "a":
             href = abs_url(a.get("href"))
-            if re.match(r"https?://", href):
+            if re.match(r"https?://", href) and not ARCA_MEDIA.fullmatch(urlsplit(href).hostname or ""):  # 아카 그림 주소는 서명이 만료돼서 눌러도 오류만 — 링크는 빼고 그림만
                 keep.append(("href", href))
         if tag in ("img", "video"):
             src = pick_src(a)
@@ -913,6 +965,35 @@ def fetch(url, limit, referer="https://arca.live/"):
         if len(data) > limit:
             raise ValueError("너무 큼")
         return data, ctype
+
+
+class SafeRedirect(urllib.request.HTTPRedirectHandler):
+    """넘겨주기(redirect)마다 주소를 다시 확인 — 공개 주소에서 내부망으로 돌려보내는 것 막기."""
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        if not safe_remote(newurl):
+            raise ValueError("가져올 수 없는 주소로 넘어가요")
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+GRAB = urllib.request.build_opener(SafeRedirect)
+PROTON_HOST = re.compile(r"(?:[a-z0-9-]+\.)*proton\.me", re.I)
+
+
+def grab_name(r):
+    """받은 파일 이름: Content-Disposition(filename* 먼저) → 주소 끝."""
+    cd = r.headers.get("Content-Disposition") or ""
+    m = re.search(r"filename\*\s*=\s*utf-8''([^;]+)", cd, re.I)
+    if m:
+        name = unquote(m.group(1).strip().strip('"'))
+    else:
+        m = re.search(r'filename\s*=\s*(?:"([^"]+)"|([^;]+))', cd, re.I)
+        name = (m.group(1) or m.group(2)).strip() if m else unquote(urlsplit(r.geturl()).path.rsplit("/", 1)[-1])
+        try:  # http.client는 머리말을 latin-1로 읽음 → 실제로는 UTF-8인 이름 되살리기
+            name = name.encode("latin-1").decode("utf-8")
+        except (UnicodeEncodeError, UnicodeDecodeError):
+            pass
+    name = re.sub(r'[\\/:*?"<>|]|[^\S ]', "_", name).strip(" .")[:120]
+    return name or "file"
 
 
 def grab_media(url):
@@ -1086,6 +1167,7 @@ def style_detail(id):
     except ValueError:
         s["chars"] = []
     s["images"] = db.q("SELECT id, image, meta, variant_id FROM style_images WHERE style_id=? ORDER BY sort, id", (id,))
+    s["articles"] = article_rows("style", id)
     s["variants"] = db.q("SELECT id, label, prompt, negative, chars, settings, memo, created FROM style_variants WHERE style_id=? ORDER BY sort, id", (id,))
     s["gallery"] = db.q("SELECT id, variant_id, image, memo, meta, created FROM sgallery WHERE style_id=? ORDER BY id DESC", (id,))
     for i in s["images"] + s["gallery"]:
@@ -1300,6 +1382,7 @@ def pgroup_detail(gid):
     g["versions"] = [persona_detail(r["id"]) for r in db.q("SELECT id FROM personas WHERE group_id=? ORDER BY sort, id", (gid,))]
     g["images"] = pimage_rows(gid)
     g["files"] = pfile_rows(gid)
+    g["articles"] = article_rows("pgroup", gid)
     return g
 
 
@@ -1387,6 +1470,7 @@ def pgroup_prune(gid):
         imgs = [r["image"] for r in db.q("SELECT image FROM pimages WHERE group_id=?", (gid,))]
         db.x("DELETE FROM pimages WHERE group_id=?", (gid,))
         drop_pfiles("group_id=?", gid)
+        drop_articles("pgroup", gid)
         db.x("DELETE FROM pgroups WHERE id=?", (gid,))
         drop_media(*imgs)
 
@@ -1525,7 +1609,7 @@ def export_zip(out):
             group = f"자료함/{safe_name(itypes.get(item, item) or '기타')}" if item else f"봇/{safe_name(fl[0] if fl else '폴더 없음')}"
             bdir = slot(f"{root}/{group}", b["name"] or f"봇 {b['id']}")
             taken[bdir] = {"info.txt", "채팅 로그"}
-            mb = {k: b[k] for k in ("name", "creator", "status", "itype", "in_risu", "memo", "info", "created", "updated")} | {
+            mb = {k: b[k] for k in ("name", "creator", "status", "itype", "in_risu", "inbox", "memo", "info", "created", "updated")} | {
                 "tags": tags_of(b["tags"]), "rx": json.loads(b["rx"] or "{}"), "persona": b["persona_id"], "folders": fl, "dir": bdir[len(root) + 1:], "versions": [], "loose": [], "chats": [],
                 "links": db.q("SELECT title, url, note FROM links WHERE bot_id=? ORDER BY sort, id", (b["id"],))}
             if b["cover"]:
@@ -1545,10 +1629,10 @@ def export_zip(out):
                 fnames[f["id"]] = arc.rsplit("/", 1)[1]
                 return {"kind": f["kind"], "name": f["name"], "note": f["note"], "file": fnames[f["id"]]}
 
-            for i, v in enumerate(db.q("SELECT * FROM versions WHERE bot_id=? ORDER BY created, id", (b["id"],)), 1):
+            for i, v in enumerate(db.q("SELECT * FROM versions WHERE bot_id=? ORDER BY sort, created, id", (b["id"],)), 1):
                 d = slot(bdir, v["name"] or f"버전 {i}")
                 vdir[v["id"]] = d.rsplit("/", 1)[1]
-                mv = {k: v[k] for k in ("name", "note", "released", "current", "created")} | {"dir": vdir[v["id"]], "info": v["info"], "files": [], "intros": []}
+                mv = {k: v[k] for k in ("name", "note", "released", "current", "created", "sort")} | {"dir": vdir[v["id"]], "info": v["info"], "files": [], "intros": []}
                 mv["files"] = [put(d, f) for f in files if f["version_id"] == v["id"]]
                 if (v["basic"] or "").strip():  # 이 버전 전용 기본 소개
                     mv["basic"] = intro(d, "기본 소개", v["basic"])
@@ -1601,7 +1685,9 @@ def export_zip(out):
                 return arc[len(sdir) + 1:]
             text(f"{sdir}/{safe_name(s['name'] or '그림체')}.botkive-style.json", json.dumps(style_export([s["id"]], gal), ensure_ascii=False))
             linked = db.q("SELECT b.name, x.role FROM bot_styles x JOIN bots b ON b.id=x.bot_id WHERE x.style_id=?", (s["id"],))
-            manifest["styles"].append({"name": s["name"], "dir": sdir[len(root) + 1:], "folders": [folders[i]["name"] for i in s["folders"] if i in folders], "bots": linked})
+            manifest["styles"].append({"name": s["name"], "dir": sdir[len(root) + 1:], "folders": [folders[i]["name"] for i in s["folders"] if i in folders], "bots": linked,
+                                       "articles": [{k: a[k] for k in ("title", "url", "author", "at")} | {"dir": f"{sdir}/아카 글"[len(root) + 1:], "file": intro(f"{sdir}/아카 글", a["title"], a["html"])}
+                                                    for a in article_rows("style", s["id"])]})
 
         manifest["pgroups"] = [{k: g[k] for k in ("id", "name", "ptype", "created")} for g in db.q("SELECT * FROM pgroups ORDER BY id")]
         gtype = {g["id"]: g["ptype"] for g in manifest["pgroups"]}
@@ -1636,6 +1722,10 @@ def export_zip(out):
                     arc = slot(f"{gdirs[g['id']]}/갤러리", f"{len(g['images']) + 1:03d}.{r['image'].rsplit('.', 1)[1]}")
                     z.write(f, arc, compress_type=zipfile.ZIP_STORED)
                     g["images"].append({"file": arc[len(root) + 1:], "persona": r["persona_id"], "memo": r["memo"] or "", "created": r["created"]})
+            g["articles"] = []  # 아카 글: 폴더 아래 '아카 글'
+            if g["id"] in gdirs:
+                g["articles"] = [{k: a[k] for k in ("title", "url", "author", "at")} | {"dir": f"{gdirs[g['id']]}/아카 글"[len(root) + 1:], "file": intro(f"{gdirs[g['id']]}/아카 글", a["title"], a["html"])}
+                                 for a in article_rows("pgroup", g["id"])]
             g["files"] = []  # 폴더 공통 자료
             for f in db.q("SELECT * FROM pfiles WHERE group_id=? AND persona_id IS NULL ORDER BY id", (g["id"],)):
                 if g["id"] in gdirs and (DATA / f["path"]).is_file():
@@ -1752,6 +1842,11 @@ def _import_zip(z, job, made):
         c.feed(body)
         return c.result().strip()[:3_000_000]
 
+    def add_articles(owner, oid, lst_):
+        for a in lst(lst_):
+            if isinstance(a, dict) and (html := intro(txt(a.get("dir"), 2000), txt(a.get("file"), 300))):
+                add_article(owner, oid, txt(a.get("title"), 300), html, txt(a.get("url"), 300), txt(a.get("author"), 100), when(a.get("at")))
+
     labels = {}
 
     def label(t, key, fallback):
@@ -1840,6 +1935,7 @@ def _import_zip(z, job, made):
         gid = gmap.get(g.get("id")) if isinstance(g, dict) else None
         if gid not in made["pgroups"]:
             continue
+        add_articles("pgroup", gid, g.get("articles"))
         for im in lst(g.get("images")):
             if isinstance(im, dict) and (name := media(txt(im.get("file"), 2000))):
                 pid = persona_of(im.get("persona"))
@@ -1876,7 +1972,7 @@ def _import_zip(z, job, made):
         if not isinstance(mb, dict):
             continue
         item = txt(mb.get("itype"), 40)
-        vals = clean({k: mb[k] for k in ("name", "creator", "in_risu", "memo", "info") if k in mb}, BOT_FIELDS)
+        vals = clean({k: mb[k] for k in ("name", "creator", "in_risu", "inbox", "memo", "info") if k in mb}, BOT_FIELDS)
         vals.setdefault("name", "이름 없는 봇")
         if (vals["name"], vals.get("creator", ""), bool(item)) in have:
             out["skipped"].append(vals["name"])
@@ -1905,10 +2001,10 @@ def _import_zip(z, job, made):
             if not isinstance(mv, dict):
                 continue
             d = f"{bdir}/{mv.get('dir')}"
-            vid, _ = db.x("INSERT INTO versions(bot_id, name, note, released, current, info, basic, created) VALUES (?,?,?,?,0,?,?,?)",
+            vid, _ = db.x("INSERT INTO versions(bot_id, name, note, released, current, info, basic, created, sort) VALUES (?,?,?,?,0,?,?,?,?)",
                           (bid, txt(mv.get("name"), 40), txt(mv.get("note"), 4000), txt(mv.get("released"), 20),
                            json.dumps(mv.get("info") if isinstance(mv.get("info"), dict) else {}, ensure_ascii=False)[:400_000],
-                           intro(d, mv.get("basic")), when(mv.get("created"))))
+                           intro(d, mv.get("basic")), when(mv.get("created")), mv.get("sort") if isinstance(mv.get("sort"), int) else 0))
             if mv.get("current") and not cur:
                 cur = vid
             for mf in lst(mv.get("files")):
@@ -1977,6 +2073,8 @@ def _import_zip(z, job, made):
             out["failed_styles"].append(txt(ms.get("name"), 200))
             continue
         made["styles"] += ids
+        if ids:
+            add_articles("style", ids[0], ms.get("articles"))
         for sid in ids:
             db.many("INSERT OR IGNORE INTO style_folders(style_id, folder_id) VALUES (?,?)",
                     [(sid, fids["style", n]) for n in map(lambda x: txt(x, 20), lst(ms.get("folders"))) if ("style", n) in fids])
@@ -2021,7 +2119,7 @@ def clean_tags(v):
 
 
 def bot_summaries(folder=None, items=False):
-    sql = """SELECT b.id, b.name, b.creator, b.status, b.itype, b.in_risu, b.cover, b.updated, b.opened, b.created, b.tags, b.persona_id,
+    sql = """SELECT b.id, b.name, b.creator, b.status, b.itype, b.in_risu, b.inbox, b.cover, b.updated, b.opened, b.created, b.tags, b.persona_id,
                (SELECT COUNT(*) FROM chats c WHERE c.bot_id=b.id) AS chats,
                (SELECT COUNT(*) FROM files f WHERE f.bot_id=b.id) AS files,
                (SELECT MAX(COALESCE(c.updated, c.created)) FROM chats c WHERE c.bot_id=b.id) AS chat_at,
@@ -2037,6 +2135,7 @@ def bot_summaries(folder=None, items=False):
     for r in rows:
         r["folders"] = fm.get(r["id"], [])
         r["has_intro"] = bool(r["has_intro"])
+        r["inbox"] = bool(r["inbox"])
         r["tags"] = tags_of(r["tags"])
     return rows
 
@@ -2049,7 +2148,7 @@ def bot_detail(id):
     b["folders"] = folders_of([id]).get(id, [])
     b["links"] = db.q("SELECT * FROM links WHERE bot_id=? ORDER BY sort, id", (id,))
     b["files"] = db.q("SELECT * FROM files WHERE bot_id=? ORDER BY created DESC", (id,))
-    b["versions"] = db.q("SELECT * FROM versions WHERE bot_id=? ORDER BY created DESC, id DESC", (id,))
+    b["versions"] = db.q("SELECT * FROM versions WHERE bot_id=? ORDER BY sort DESC, created DESC, id DESC", (id,))
     ins = db.q("""SELECT i.* FROM intros i JOIN versions v ON v.id=i.version_id WHERE v.bot_id=? ORDER BY i.sort, i.id""", (id,))
     for v in b["versions"]:
         v["intros"] = [i for i in ins if i["version_id"] == v["id"]]
@@ -2104,8 +2203,9 @@ def new_version(bot_id, name="", note="", released="", info=None, current=True):
         ver = str((info or {}).get("version") or "").strip()
         n = db.q("SELECT COUNT(*) AS n FROM versions WHERE bot_id=?", (bot_id,))[0]["n"]
         name = f"v{ver}" if ver else ("첫 버전" if not n else "{0.year}. {0.month}. {0.day}. 버전".format(datetime.now(KST)))
-    vid, _ = db.x("INSERT INTO versions(bot_id, name, note, released, info, created) VALUES (?,?,?,?,?,?)",
-                  (bot_id, name[:40], note[:4000], released[:20], json.dumps(info or {}, ensure_ascii=False)[:400_000], now()))
+    top = db.q("SELECT MAX(sort) AS n FROM versions WHERE bot_id=?", (bot_id,))[0]["n"] or 0
+    vid, _ = db.x("INSERT INTO versions(bot_id, name, note, released, info, created, sort) VALUES (?,?,?,?,?,?,?)",
+                  (bot_id, name[:40], note[:4000], released[:20], json.dumps(info or {}, ensure_ascii=False)[:400_000], now(), top + 1 if top else 0))
     if current or not db.q("SELECT 1 FROM versions WHERE bot_id=? AND current=1", (bot_id,)):
         set_current(vid)
     return vid
@@ -2495,6 +2595,7 @@ def state():
         "shelves": db.q("""SELECT s.*, (SELECT COUNT(*) FROM files f WHERE f.shelf_id=s.id AND f.bot_id IS NULL) AS count
                            FROM shelves s ORDER BY sort, id"""),
         "bots": db.q("SELECT COUNT(*) AS n FROM bots WHERE COALESCE(itype, '') = ''")[0]["n"],
+        "inbox": db.q("SELECT COUNT(*) AS n FROM bots WHERE inbox=1")[0]["n"],
         "chats": db.q("SELECT COUNT(*) AS n FROM chats")[0]["n"],
         "loose": db.q("SELECT COUNT(*) AS n FROM files WHERE bot_id IS NULL")[0]["n"],
         "colors": sorted(COLORS),
@@ -2554,25 +2655,112 @@ class Handler(BaseHTTPRequestHandler):
             except (urllib.error.URLError, TimeoutError) as e:
                 return self.send(502, {"error": f"랠름에 연결하지 못했어요: {e}"})
             with r:
-                n = int(r.headers.get("Content-Length") or 0)
-                if n > MAX_FILE:
-                    return self.send(413, {"error": "카드가 너무 커요"})
-                self.send_response(200)
-                self.send_header("Content-Type", "application/octet-stream")
-                self.send_header("X-Ext", ext)
-                if n:
-                    self.send_header("Content-Length", str(n))
-                self.send_header("Cache-Control", "no-store")
-                for k, v in SECURITY_HEADERS.items():
-                    self.send_header(k, v)
-                if not n:  # 길이를 모르면 끝을 연결 끊기로 알림
-                    self.close_connection = True
-                    self.send_header("Connection", "close")
-                self.end_headers()
+                return self.pipe(r, {"X-Ext": ext})
+        return self.send(403, {"error": last})
+
+    def pipe(self, r, extra):
+        """바깥에서 받는 응답을 메모리에 쌓지 않고 1MB씩 그대로 넘김."""
+        n = int(r.headers.get("Content-Length") or 0)
+        if n > MAX_FILE:
+            return self.send(413, {"error": "파일이 너무 커요"})
+        self.send_response(200)
+        self.send_header("Content-Type", "application/octet-stream")
+        for k, v in extra.items():
+            self.send_header(k, v)
+        if n:
+            self.send_header("Content-Length", str(n))
+        self.send_header("Cache-Control", "no-store")
+        for k, v in SECURITY_HEADERS.items():
+            self.send_header(k, v)
+        if not n:  # 길이를 모르면 끝을 연결 끊기로 알림
+            self.close_connection = True
+            self.send_header("Connection", "close")
+        self.end_headers()
+        try:
+            while chunk := r.read(1 << 20):
+                self.wfile.write(chunk)
+        except (BrokenPipeError, ConnectionResetError):  # 받다가 창을 닫음
+            self.close_connection = True
+
+    def relay_proton(self, d):
+        """프로톤 드라이브 공개 링크 — 브라우저의 프로톤 SDK(app/proton.js)가 만든 요청을 프로톤 주소로만 대신 보내고 답을 그대로 넘김."""
+        url = str(d.get("url") or "")
+        p = urlsplit(url)
+        method = str(d.get("method") or "GET").upper()
+        if p.scheme != "https" or not PROTON_HOST.fullmatch(p.hostname or "") or method not in ("GET", "POST", "PUT", "DELETE"):
+            return self.send(400, {"error": "프로톤 주소만 보낼 수 있어요"})
+        hd = {k: str(v) for k, v in (d.get("headers") or {}).items() if re.match(r"(x-pm-|pm-|authorization$|content-type$|accept$)", str(k), re.I)}
+        hd["User-Agent"] = UA
+        try:
+            body = base64.b64decode(d["body"]) if d.get("body") else None
+        except ValueError:
+            return self.send(400, {"error": "보낼 내용이 깨졌어요"})
+        try:
+            r = GRAB.open(urllib.request.Request(url, data=body, method=method, headers=hd), timeout=60)
+        except urllib.error.HTTPError as e:
+            r = e  # 프로톤의 오류 답(JSON)도 그대로 넘겨야 SDK가 알아봄
+        except ValueError as e:
+            return self.send(400, {"error": str(e)})
+        except (urllib.error.URLError, TimeoutError, OSError) as e:
+            return self.send(502, {"error": f"프로톤에 연결하지 못했어요: {e}"})
+        with r:
+            n = r.headers.get("Content-Length")
+            self.send_response(r.status)
+            self.send_header("Content-Type", r.headers.get("Content-Type") or "application/octet-stream")
+            self.send_header("X-Proton", "1")
+            self.send_header("Cache-Control", "no-store")
+            for k, v in SECURITY_HEADERS.items():
+                self.send_header(k, v)
+            if n:
+                self.send_header("Content-Length", n)
+            else:
+                self.close_connection = True
+                self.send_header("Connection", "close")
+            self.end_headers()
+            try:
                 while chunk := r.read(1 << 20):
                     self.wfile.write(chunk)
-            return
-        return self.send(403, {"error": last})
+            except (BrokenPipeError, ConnectionResetError):  # 브라우저가 먼저 끊음 (SDK가 그만둔 요청)
+                self.close_connection = True
+
+    def mega_info(self, fid):
+        """메가 공개 파일 링크 → {g: 받을 주소(https), s: 크기, at: 암호화된 이름}. 푸는 열쇠(링크 # 뒤)는 서버로 안 옴 — 브라우저가 풂."""
+        if not re.fullmatch(r"[\w-]{8}", fid):
+            return self.send(400, {"error": "메가 파일 링크가 아니에요"})
+        req = urllib.request.Request("https://g.api.mega.co.nz/cs?id=0", data=json.dumps([{"a": "g", "g": 1, "ssl": 1, "p": fid}]).encode(),
+                                     headers={"User-Agent": UA, "Content-Type": "application/json"})
+        try:
+            with urllib.request.urlopen(req, timeout=20) as r:
+                d = json.loads(r.read(100_000))
+        except (OSError, ValueError) as e:
+            return self.send(502, {"error": f"메가에 연결하지 못했어요: {e}"})
+        d = d[0] if isinstance(d, list) and d else d
+        if not isinstance(d, dict) or not d.get("g"):
+            return self.send(404, {"error": "메가에서 파일을 찾지 못했어요 (지워졌거나 막힘)" if d in (-9, -2, -16) or isinstance(d, int) else "메가 답을 못 알아봤어요"})
+        return self.send(200, {"g": str(d["g"]).replace("http://", "https://", 1), "s": d.get("s") or 0, "at": d.get("at") or ""})
+
+    def relay_grab(self, url):
+        """아카 글에서 찾은 링크의 파일 받기 — https 공개 주소만(넘겨주기도 매번 확인), 파일 대신 웹 페이지가 오면 거절."""
+        url = (url or "").strip()
+        if not safe_remote(url):
+            return self.send(400, {"error": "받을 수 없는 주소예요 (https 공개 주소만)"})
+        hd = {"User-Agent": UA, "Accept-Language": "ko-KR,ko;q=0.9"}
+        if (urlsplit(url).hostname or "").endswith("namu.la"):  # 아카 그림은 아카에서 연 것처럼
+            hd["Referer"] = "https://arca.live/"
+        try:
+            r = GRAB.open(urllib.request.Request(url, headers=hd), timeout=30)
+        except urllib.error.HTTPError as e:
+            return self.send(502, {"error": {401: "로그인해야 받을 수 있는 링크예요", 403: "그쪽에서 내려받기를 막았어요 (비공개·로그인 필요·만료)",
+                                             404: "파일이 없어요 (지워졌거나 주소가 바뀜)", 410: "만료된 링크예요"}.get(e.code, f"그쪽 서버가 {e.code}로 거절했어요")})
+        except ValueError as e:
+            return self.send(400, {"error": str(e)})
+        except (urllib.error.URLError, TimeoutError, OSError) as e:
+            return self.send(502, {"error": f"연결하지 못했어요: {e}"})
+        with r:
+            ctype = (r.headers.get("Content-Type") or "").split(";")[0].strip().lower()
+            if ctype in ("text/html", "application/xhtml+xml"):
+                return self.send(415, {"error": "파일 대신 웹 페이지가 왔어요 — 로그인·확인 단계가 있는 링크라 직접 받아야 해요"})
+            return self.pipe(r, {"X-Name": quote(grab_name(r))})
 
     def send_mod_asset(self, fname, i):
         at = risum_assets_at(fname)
@@ -2830,6 +3018,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send(200, {"ok": True, "locked": True})
             if not self.gate():
                 return
+            if parts == ["proton.js"]:  # 프로톤 링크를 받을 때만 불러옴 (tools/proton에서 만듦)
+                return self.send(200, (APP / "proton.js").read_bytes(), "text/javascript; charset=utf-8", "no-cache")
             if parts[0] == "m" and len(parts) == 2 and re.fullmatch(MEDIA_RE, parts[1]):
                 return self.send_file(MEDIA / parts[1], CTYPES[parts[1].rsplit(".", 1)[1]])
             if parts[0] == "f" and len(parts) == 2 and re.fullmatch(FILE_RE, parts[1]):
@@ -2844,6 +3034,14 @@ class Handler(BaseHTTPRequestHandler):
                 if not self.write_ok():  # 바깥으로 나가는 요청이라 앱에서 부른 것만
                     return
                 return self.relay_realm(p[1])
+            if p == ["grab"]:
+                if not self.write_ok():
+                    return
+                return self.relay_grab(params.get("u"))
+            if len(p) == 2 and p[0] == "mega":
+                if not self.write_ok():
+                    return
+                return self.mega_info(p[1])
             if p == ["health"]:
                 return self.send(200, {"ok": True, "bots": db.q("SELECT COUNT(*) AS n FROM bots")[0]["n"], "chats": db.q("SELECT COUNT(*) AS n FROM chats")[0]["n"]})
             if p == ["stats"]:
@@ -3034,6 +3232,24 @@ class Handler(BaseHTTPRequestHandler):
                 return self.auth_post(p, d)
             if not self.gate():
                 return
+            if p == ["proton"]:
+                return self.relay_proton(d)
+            if p == ["articles"]:  # {owner: pgroup|style, owner_id, article_id?, html, title, url, author} 붙여넣은 아카 글
+                owner, oid, aid = d.get("owner"), d.get("owner_id"), d.get("article_id")
+                table = ARTICLE_OWNERS.get(owner)
+                if not table or not isinstance(oid, int) or not db.q(f"SELECT 1 FROM {table} WHERE id=?", (oid,)):
+                    return self.send(404, {"error": "글을 붙일 곳이 없어요"})
+                url, title, author = str(d.get("url") or "")[:300], str(d.get("title") or ""), str(d.get("author") or "")
+                html, ok, miss = clean_intro(str(d.get("html") or ""), url)
+                old = db.q("SELECT * FROM articles WHERE id=? AND owner=? AND owner_id=?", (aid, owner, oid)) if isinstance(aid, int) else []
+                if old:  # 그 글을 새로 넣기
+                    aid = old[0]["id"]
+                    db.x("UPDATE articles SET title=?, html=?, url=?, author=?, at=? WHERE id=?", (title[:300] or old[0]["title"], html, url, author[:100], now(), aid))
+                    gc_intro(old[0]["html"])
+                else:
+                    aid = add_article(owner, oid, title, html, url, author, now())
+                db.x(f"UPDATE {table} SET updated=? WHERE id=?", (now(), oid))
+                return self.send(200, {"ok": True, "id": aid, "got": ok, "miss": miss, "articles": article_rows(owner, oid)})
             if p == ["styles"]:
                 return self.send(200, style_detail(new_style(d)))
             if len(p) == 3 and p[0] == "bots" and p[1].isdigit() and p[2] == "images":  # {image(data URL), chat_id, idx, memo}
@@ -3110,6 +3326,8 @@ class Handler(BaseHTTPRequestHandler):
                 vals.setdefault("status", "later")
                 if d.get("cover"):
                     vals["cover"] = save_data_url(d["cover"])
+                if "tags" in d:
+                    vals["tags"] = json.dumps(clean_tags(d["tags"]), ensure_ascii=False)
                 vals["created"] = vals["updated"] = vals["opened"] = now()
                 cols = ", ".join(vals)
                 bid, _ = db.x(f"INSERT INTO bots({cols}) VALUES ({','.join('?' * len(vals))})", tuple(vals.values()))
@@ -3247,15 +3465,7 @@ class Handler(BaseHTTPRequestHandler):
             self.send(500, {"error": repr(e)})
 
     def gc_intro(self, old_html):
-        """예전 소개글에만 있던 그림 파일 정리 (다른 소개글·표지·장면이 쓰면 남김)."""
-        for n in set(intro_media(old_html)):
-            like = f"%/m/{n}%"
-            used = db.q("""SELECT 1 FROM bots WHERE intro_html LIKE ? OR basic LIKE ? OR cover=?
-                           UNION SELECT 1 FROM versions WHERE intro_html LIKE ? OR basic LIKE ?
-                           UNION SELECT 1 FROM intros WHERE html LIKE ? UNION SELECT 1 FROM marks WHERE image=? UNION SELECT 1 FROM bimages WHERE image=? LIMIT 1""",
-                        (like, like, n, like, like, like, n, n))
-            if not used:
-                drop_media(n)
+        gc_intro(old_html)
 
     def do_PUT(self):
         parts, params = self.route()
@@ -3286,6 +3496,8 @@ class Handler(BaseHTTPRequestHandler):
                 if not b:
                     return self.send(404, {"error": "봇이 없어요"})
                 vals = clean(d, BOT_FIELDS)
+                if "inbox" not in d and isinstance(d.get("folders"), list) and d["folders"]:  # 폴더를 넣으면 정리 끝으로 봄
+                    vals["inbox"] = 0
                 if "tags" in d:
                     vals["tags"] = json.dumps(clean_tags(d["tags"]), ensure_ascii=False)
                 if d.get("cover"):
@@ -3337,6 +3549,13 @@ class Handler(BaseHTTPRequestHandler):
                 if "title" in d:
                     db.x("UPDATE intros SET title=? WHERE id=?", (str(d["title"] or "").strip()[:300], i["id"]))
                 return self.send(200, {"ok": True, "bot": bot_detail(i["bot_id"])})
+            if p and len(p) == 2 and p[0] == "articles" and p[1].isdigit():
+                r = db.q("SELECT * FROM articles WHERE id=?", (int(p[1]),))
+                if not r:
+                    return self.send(404, {"error": "글이 없어요"})
+                if "title" in d:
+                    db.x("UPDATE articles SET title=? WHERE id=?", (str(d["title"] or "").strip()[:300], r[0]["id"]))
+                return self.send(200, {"ok": True, "articles": article_rows(r[0]["owner"], r[0]["owner_id"])})
             if p and len(p) == 2 and p[0] == "styles" and p[1].isdigit():
                 sid = int(p[1])
                 if not db.q("SELECT 1 FROM styles WHERE id=?", (sid,)):
@@ -3463,6 +3682,16 @@ class Handler(BaseHTTPRequestHandler):
                     vals["color"] = d["color"]
                 if vals:
                     db.x(f"UPDATE {p[0]} SET {', '.join(k + '=?' for k in vals)} WHERE key=?", (*vals.values(), p[1]))
+                return self.send(200, {"ok": True, "state": state()})
+            if p and len(p) == 4 and p[0] == "bots" and p[1].isdigit() and p[2:] == ["versions", "order"]:  # {ids: [위 → 아래]}
+                bid = int(p[1])
+                mine = {r["id"] for r in db.q("SELECT id FROM versions WHERE bot_id=?", (bid,))}
+                ids = [i for i in d.get("ids") or [] if i in mine]
+                db.many("UPDATE versions SET sort=? WHERE id=?", [(len(ids) - n, i) for n, i in enumerate(ids)])
+                return self.send(200, {"ok": True, "bot": bot_detail(bid)})
+            if p == ["folders", "order"]:  # {ids: [폴더 id…]} 이 순서대로 (한 칸 안에서)
+                ids = [i for i in d.get("ids") or [] if isinstance(i, int)]
+                db.many("UPDATE folders SET sort=? WHERE id=?", [(n, i) for n, i in enumerate(ids, 1)])
                 return self.send(200, {"ok": True, "state": state()})
             if p and len(p) == 2 and p[0] in ("folders", "shelves") and p[1].isdigit():
                 vals = {}
@@ -3787,12 +4016,20 @@ class Handler(BaseHTTPRequestHandler):
                 db.x("DELETE FROM sgallery WHERE id=?", (int(p[1]),))
                 drop_media(r[0]["image"])
                 return self.send(200, {"ok": True, "gallery": sgallery_rows(r[0]["style_id"])})
+            if p and len(p) == 2 and p[0] == "articles" and p[1].isdigit():
+                r = db.q("SELECT * FROM articles WHERE id=?", (int(p[1]),))
+                if not r:
+                    return self.send(404, {"error": "글이 없어요"})
+                db.x("DELETE FROM articles WHERE id=?", (r[0]["id"],))
+                gc_intro(r[0]["html"])
+                return self.send(200, {"ok": True, "articles": article_rows(r[0]["owner"], r[0]["owner_id"])})
             if p and len(p) == 2 and p[0] in ("styles", "style_images") and p[1].isdigit():
                 id = int(p[1])
                 if p[0] == "styles":
                     imgs = [g["image"] for g in db.q("SELECT image FROM style_images WHERE style_id=? UNION ALL SELECT image FROM sgallery WHERE style_id=?", (id, id))]
                     db.x("DELETE FROM sgallery WHERE style_id=?", (id,))
                     db.x("DELETE FROM style_variants WHERE style_id=?", (id,))
+                    drop_articles("style", id)
                     db.x("DELETE FROM styles WHERE id=?", (id,))
                     drop_media(*imgs)
                     return self.send(200, {"ok": True})
